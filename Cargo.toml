@@ -1,0 +1,14 @@
+[package]
+name = "tweet-provider"
+version = "0.1.0"
+authors = ["Rasmus Karlsson <rasmus.karlsson@pajlada.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = "1.0"
+actix = "0.8.2"
+actix-web-actors = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = ""
