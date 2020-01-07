@@ -12,3 +12,6 @@ actix = "0.8.2"
 actix-web-actors = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = ""
+futures = "0.3"
+twitter-stream = "=0.10.0-alpha.5"
+tokio = { version = "0.2", features = ["macros"]  }

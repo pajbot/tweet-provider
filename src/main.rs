@@ -1,8 +1,13 @@
 use actix::{Actor, StreamHandler};
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
+use tokio::runtime::Runtime;
+use futures::prelude::*;
+use futures::executor::block_on;
 use serde::{Deserialize, Serialize};
+use twitter_stream::Token;
 
+use std::env;
 use std::collections::HashSet;
 // use serde_json::{Result, Value};
 
@@ -168,8 +173,39 @@ impl StreamHandler<ws::Message, ws::ProtocolError> for WebsocketConnection {
     }
 }
 
+async fn start_twitter_listener() {
+
+    let token = Token::new(
+        env::var("PAJBOT_TWITTER_CONSUMER_KEY").unwrap(),
+        env::var("PAJBOT_TWITTER_CONSUMER_SECRET").unwrap(),
+        env::var("PAJBOT_TWITTER_ACCESS_TOKEN").unwrap(),
+        env::var("PAJBOT_TWITTER_ACCESS_TOKEN_SECRET").unwrap(),
+    );
+
+    let a = [81085011];
+    let uids : &[u64]= &a;
+
+    twitter_stream::Builder::filter(token)
+        .follow(Some(uids))
+        .listen()
+        .try_flatten_stream()
+        .try_for_each(|json| {
+            println!("{}", json);
+            future::ok(())
+        })
+        .await
+        .unwrap();
+}
+
 fn main() {
-    println!("Hello, world!");
+    block_on(async_main());
+}
+
+async fn async_main() {
+    let rt = Runtime::new().unwrap();
+
+    rt.spawn(start_twitter_listener());
+
     HttpServer::new(|| {
         App::new()
             .route("/", web::get().to(index))
