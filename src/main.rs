@@ -1,5 +1,6 @@
+use std::time::{Duration, Instant};
 use actix::{Actor, StreamHandler};
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder, Error};
 use actix_web_actors::ws;
 use tokio::runtime::Runtime;
 use futures::prelude::*;
@@ -15,10 +16,21 @@ fn index() -> impl Responder {
     HttpResponse::Ok().body("Hello world!")
 }
 
-fn ws(req: HttpRequest, stream: web::Payload) -> impl Responder {
-    let resp = ws::start(WebsocketConnection::new(), &req, stream);
+async fn pubsub_client_route(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error>{
+    let resp = ws::start(PubSubClient{
+        id: 0,
+        hb: Instant::now(),
+        addr: srv.get_ref().clone(),
+    }, &req, stream);
+    // let resp = ws::start(WebsocketConnection::new(), &req, stream);
     println!("{:?}", resp);
     resp
+}
+
+struct PubSubClient {
+    id: usize,
+    hb: Instant,
+    addr: Addr<PubSubServer>,
 }
 
 struct WebsocketConnection {
@@ -208,8 +220,8 @@ async fn async_main() {
 
     HttpServer::new(|| {
         App::new()
+            .service(web::resource("/ws/").to(pubsub_client_route))
             .route("/", web::get().to(index))
-            .route("/ws/", web::get().to(ws))
     })
     .bind("127.0.0.1:1235")
     .unwrap()
