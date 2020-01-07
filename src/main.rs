@@ -1,26 +1,31 @@
 use std::time::{Duration, Instant};
-use actix::{Actor, StreamHandler};
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder, Error};
+use actix::*;
+use tokio::signal;
+use actix::{Actor, StreamHandler, Addr, Handler, Running, fut};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Error};
 use actix_web_actors::ws;
 use tokio::runtime::Runtime;
 use futures::prelude::*;
-use futures::executor::block_on;
+use futures::stream::TryForEach;
 use serde::{Deserialize, Serialize};
-use twitter_stream::Token;
+use twitter_stream::{Token, FutureTwitterStream};
 
 use std::env;
 use std::collections::HashSet;
 // use serde_json::{Result, Value};
 
-fn index() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
+mod server;
 
-async fn pubsub_client_route(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error>{
+async fn pubsub_client_route(
+    req: HttpRequest,
+    stream: web::Payload,
+    srv: web::Data<Addr<server::PubSubServer>>,
+    ) -> Result<HttpResponse, Error>{
     let resp = ws::start(PubSubClient{
         id: 0,
         hb: Instant::now(),
         addr: srv.get_ref().clone(),
+        topics: HashSet::new(),
     }, &req, stream);
     // let resp = ws::start(WebsocketConnection::new(), &req, stream);
     println!("{:?}", resp);
@@ -30,23 +35,36 @@ async fn pubsub_client_route(req: HttpRequest, stream: web::Payload) -> Result<H
 struct PubSubClient {
     id: usize,
     hb: Instant,
-    addr: Addr<PubSubServer>,
-}
+    addr: Addr<server::PubSubServer>,
 
-struct WebsocketConnection {
     topics: HashSet<String>,
 }
 
-impl WebsocketConnection {
-    fn new() -> WebsocketConnection {
-        WebsocketConnection {
-            topics: HashSet::new(),
-        }
+impl Actor for PubSubClient {
+    type Context = ws::WebsocketContext<Self>;
+
+    /// Method is called on actor start.
+    /// We register ws session with ChatServer
+    fn started(&mut self, ctx: &mut Self::Context) {
+        // we'll start heartbeat process on session start.
+        self.hb(ctx);
+    }
+
+    fn stopping(&mut self, _: &mut Self::Context) -> Running {
+        // notify chat server
+        self.addr.do_send(server::Disconnect { id: self.id });
+        Running::Stop
     }
 }
 
-impl Actor for WebsocketConnection {
-    type Context = ws::WebsocketContext<Self>;
+/// Handle messages from chat server, we simply send it to peer websocket
+impl Handler<server::Message> for PubSubClient {
+    type Result = ();
+
+    fn handle(&mut self, msg: server::Message, ctx: &mut Self::Context) {
+        println!("Handle server::Message");
+        ctx.text(msg.0);
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -56,7 +74,7 @@ struct TweetURL {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct Tweet {
+pub struct Tweet {
     screen_name: String,
     text: String,
     in_reply_to_screen_name: Option<String>,
@@ -109,29 +127,66 @@ enum ServiceRequest {
     Tweet(Tweet),
 }
 
-impl StreamHandler<ws::Message, ws::ProtocolError> for WebsocketConnection {
-    fn handle(&mut self, msg: ws::Message, ctx: &mut Self::Context) {
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for PubSubClient {
+    fn handle(
+        &mut self,
+        msg: Result<ws::Message, ws::ProtocolError>,
+        ctx: &mut Self::Context,
+    ) {
+        let msg = match msg {
+            Err(_) => {
+                ctx.stop();
+                return;
+            }
+            Ok(msg) => msg,
+        };
+
         match msg {
-            ws::Message::Ping(msg) => ctx.pong(&msg),
+            ws::Message::Ping(msg) => {
+                println!("Received ping");
+                self.hb = Instant::now();
+                ctx.pong(&msg);
+            }
+            ws::Message::Pong(_) => {
+                println!("Received pong");
+                self.hb = Instant::now();
+            }
             ws::Message::Text(text) => {
                 let request = serde_json::from_str::<ServiceRequest>(&text);
                 match request {
                     Ok(f) => match f {
-                        ServiceRequest::Subscribe(m) => match self.topics.insert(m.topic.clone()) {
-                            true => {
-                                let r = ServiceResponse::SubscribeResponse(format!(
-                                    "Successfully subscribed to topic {}",
-                                    m.topic
-                                ));
-                                ctx.text(serde_json::to_string(&r).unwrap());
-                            }
-                            false => {
-                                let r = ServiceResponse::SubscribeResponse(format!(
-                                    "You are already subscribed to the topic {}",
-                                    m.topic
-                                ));
-                                ctx.text(serde_json::to_string(&r).unwrap());
-                            }
+                        ServiceRequest::Subscribe(m) => {
+                            let addr = ctx.address();
+                            self.addr
+                                .send(server::Subscribe {
+                                    twitter_user_id: 81085011,
+                                    addr: addr.recipient(),
+                                })
+                                .into_actor(self)
+                                .then(move |res, _, ctx| {
+                                    match res {
+                                        Ok(res) => match res {
+                                            true => {
+                                                let r = ServiceResponse::SubscribeResponse(format!(
+                                                        "Successfully subscribed to topic {}",
+                                                        m.topic
+                                                        ));
+                                                ctx.text(serde_json::to_string(&r).unwrap());
+                                            }
+                                            false => {
+                                                let r = ServiceResponse::SubscribeResponse(format!(
+                                                        "You are already subscribed to the topic {}",
+                                                        m.topic
+                                                        ));
+                                                ctx.text(serde_json::to_string(&r).unwrap());
+                                            }
+                                        }
+                                        // something is wrong with chat server
+                                        _ => ctx.stop(),
+                                    }
+                                    fut::ready(())
+                                })
+                                .wait(ctx);
                         },
 
                         ServiceRequest::Unsubscribe(m) => match self.topics.remove(&m.topic) {
@@ -162,6 +217,23 @@ impl StreamHandler<ws::Message, ws::ProtocolError> for WebsocketConnection {
                             };
                             let r = ServiceResponse::Tweet(t);
                             ctx.text(serde_json::to_string(&r).unwrap());
+
+
+                            let addr = ctx.address();
+                            self.addr
+                                .send(server::Poll {})
+                                .into_actor(self)
+                                .then(move |res, _, ctx| {
+                                    match res {
+                                        Ok(_) => {
+                                            println!("ok");
+                                        }
+                                        // something is wrong with chat server
+                                        _ => ctx.stop(),
+                                    }
+                                    fut::ready(())
+                                })
+                                .wait(ctx);
                         }
 
                         ServiceRequest::Tweet(m) => {
@@ -185,14 +257,67 @@ impl StreamHandler<ws::Message, ws::ProtocolError> for WebsocketConnection {
     }
 }
 
-async fn start_twitter_listener() {
+/// How often heartbeat pings are sent
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+/// How long before lack of client response causes a timeout
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
+impl PubSubClient {
+    /// helper method that sends ping to client every second.
+    ///
+    /// also this method checks heartbeats from client
+    fn hb(&self, ctx: &mut ws::WebsocketContext<Self>) {
+        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
+            // check client heartbeats
+            if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
+                // heartbeat timed out
+                println!("Websocket Client heartbeat failed, disconnecting!");
+
+                // notify chat server
+                act.addr.do_send(server::Disconnect { id: act.id });
+
+                // stop actor
+                ctx.stop();
+
+                // don't try to send a ping
+                return;
+            }
+
+            ctx.ping(b"");
+        });
+    }
+}
+
+struct Waker;
+
+struct Context<'a> {
+        waker: &'a Waker,
+        
+}
+
+impl<'a> Context<'a> {
+    fn from_waker(waker: &'a Waker) -> Self {
+                Context { waker  }
+                    
+    }
+
+    fn waker(&self) -> &'a Waker {
+                &self.waker
+                        
+    }
+    
+}
+
+async fn start_twitter_listener(server: Addr<server::PubSubServer>) {
     let token = Token::new(
         env::var("PAJBOT_TWITTER_CONSUMER_KEY").unwrap(),
         env::var("PAJBOT_TWITTER_CONSUMER_SECRET").unwrap(),
         env::var("PAJBOT_TWITTER_ACCESS_TOKEN").unwrap(),
         env::var("PAJBOT_TWITTER_ACCESS_TOKEN_SECRET").unwrap(),
     );
+
+
+    println!("Start twitter listener!");
 
     let a = [81085011];
     let uids : &[u64]= &a;
@@ -202,29 +327,54 @@ async fn start_twitter_listener() {
         .listen()
         .try_flatten_stream()
         .try_for_each(|json| {
+            server.do_send(server::Poll{});
             println!("{}", json);
             future::ok(())
         })
-        .await
+    .await
         .unwrap();
 }
 
 fn main() {
-    block_on(async_main());
-}
+    let sys = System::new("xd");
 
-async fn async_main() {
-    let rt = Runtime::new().unwrap();
+    let server = server::PubSubServer::default().start();
 
-    rt.spawn(start_twitter_listener());
+    let srv = server.clone();
 
-    HttpServer::new(|| {
-        App::new()
-            .service(web::resource("/ws/").to(pubsub_client_route))
-            .route("/", web::get().to(index))
-    })
-    .bind("127.0.0.1:1235")
-    .unwrap()
-    .run()
-    .unwrap();
+    Arbiter::spawn(async {
+        println!("xd");
+        start_twitter_listener(srv).await;
+        println!("end of twitter listener");
+    });
+
+    // let deadline = tokio::time::delay_until(Instant::now() + Duration::from_secs(5))
+    //             .map(|()| println!("5 seconds are over"))
+    //                     .map_err(|e| eprintln!("Failed to wait: {}", e));
+
+
+    // Arbiter::spawn(deadline);
+
+//     Arbiter::spawn(async {
+//         tokio::signal::ctrl_c().await.unwrap();
+//         println!("ctrl c pressed?");
+//         System::current().stop();
+//     });
+
+    Arbiter::spawn(async {
+        HttpServer::new(move || {
+            App::new()
+                .data(server.clone())
+                .service(web::resource("/ws/").to(pubsub_client_route))
+        })
+        .bind("127.0.0.1:1235").unwrap()
+            .run()
+            .await
+            .unwrap();
+        println!("end of web listener");
+    });
+
+    sys.run().unwrap();
+
+    println!("xdisdfghkkjdfghkjfdg");
 }
