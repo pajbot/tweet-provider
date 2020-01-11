@@ -18,3 +18,4 @@ serde_json = ""
 futures = "0.3"
 twitter-stream = "=0.10.0-alpha.5"
 tokio = { version = "0.2", features = ["macros", "time"]  }
+tweet = ""

@@ -4,33 +4,23 @@
 //! room through `PubSubServer`.
 
 use actix::prelude::*;
-use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, HashSet};
+use tweet::Tweet as IncomingTweetData;
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct TweetURL {
-    url: String,
-    expanded_url: String,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Tweet {
-    screen_name: String,
-    text: String,
-    in_reply_to_screen_name: Option<String>,
-    urls: Vec<TweetURL>,
-}
+use crate::response;
 
 /// Chat server sends this messages to session
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Message(pub String);
 
-/// Message for chat server communications
-
+// Incoming tweet is sent from the tweet reader
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct Poll {}
+pub struct IncomingTweet {
+    pub tweet: IncomingTweetData,
+}
 
 #[derive(Message)]
 #[rtype(bool)]
@@ -40,73 +30,41 @@ pub struct Subscribe {
     pub addr: Recipient<Message>,
 }
 
+#[derive(Message)]
+#[rtype(bool)]
+pub struct Unsubscribe {
+    pub twitter_user_id: u64,
+
+    pub addr: Recipient<Message>,
+}
+
 /// Session is disconnected
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Disconnect {
-    pub id: usize,
+    pub addr: Recipient<Message>,
 }
 
-/// Send message to specific room
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct ClientMessage {
-    /// Id of the client session
-    pub id: usize,
-    /// Peer message
-    pub msg: String,
-    /// Room name
-    pub room: String,
-}
-
-/// List of available rooms
-pub struct ListRooms;
-
-impl actix::Message for ListRooms {
-    type Result = Vec<String>;
-}
-
-/// Join room, if room does not exists create new one.
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Join {
-    /// Client id
-    pub id: usize,
-    /// Room name
-    pub name: String,
-}
-
-/// `PubSubServer` manages chat rooms and responsible for coordinating chat
-/// session. implementation is super primitive
+#[derive(Default)]
 pub struct PubSubServer {
     twitter_user: HashMap<u64, HashSet<Recipient<Message>>>,
 }
 
-impl Default for PubSubServer {
-    fn default() -> PubSubServer {
-        PubSubServer {
-            twitter_user: HashMap::new(),
-        }
-    }
-}
-
 impl PubSubServer {
-    // Publish a tweet to any interested listeners
-    fn publish_tweet(&self, twitter_user_id: u64, tweet: Tweet) {}
+    /// Send a tweet to all listeners
+    fn send_tweet(&self, twitter_user_id: u64, tweet: response::Tweet) {
+        let response = response::Message::new_tweet(tweet);
 
-    /// Send message to all users in the room
-    fn send_message(&self, room: &str, message: &str, skip_id: usize) {
-        /*
-        if let Some(sessions) = self.rooms.get(room) {
-            for id in sessions {
-                if *id != skip_id {
-                    if let Some(addr) = self.sessions.get(id) {
-                        let _ = addr.do_send(Message(message.to_owned()));
-                    }
+        let response_text = response.build();
+
+        if let Some(listeners) = self.twitter_user.get(&twitter_user_id) {
+            for listener in listeners {
+                let msg = Message(response_text.clone());
+                if let Err(e) = listener.do_send(msg) {
+                    println!("Error sending message to listener: {}", e);
                 }
             }
         }
-        */
     }
 }
 
@@ -129,17 +87,49 @@ impl Handler<Subscribe> for PubSubServer {
     }
 }
 
-impl Handler<Poll> for PubSubServer {
-    type Result = ();
+impl Handler<Unsubscribe> for PubSubServer {
+    type Result = bool;
 
-    fn handle(&mut self, _: Poll, _: &mut Context<Self>) -> Self::Result {
-        println!("xd");
-        let uid = 81085011;
-        if let Some(listeners) = self.twitter_user.get(&uid) {
-            for listener in listeners {
-                listener.do_send(Message(String::from("hi"))).unwrap();
+    fn handle(&mut self, msg: Unsubscribe, _: &mut Context<Self>) -> Self::Result {
+        match self.twitter_user.entry(msg.twitter_user_id) {
+            Occupied(mut entry) => {
+                return entry.get_mut().remove(&msg.addr);
+            }
+            Vacant(_) => {
+                return false;
             }
         }
+    }
+}
+
+impl Handler<IncomingTweet> for PubSubServer {
+    type Result = ();
+
+    fn handle(&mut self, tweet: IncomingTweet, _: &mut Context<Self>) -> Self::Result {
+        let tweet = tweet.tweet;
+        println!("xd");
+        println!("Tweet: {:#?}", tweet);
+
+        // Make a tweet output
+        let mut out_tweet_xd = response::Tweet {
+            screen_name: tweet.user.screen_name.clone(),
+            text: tweet.full_text().clone(),
+            in_reply_to_screen_name: tweet.in_reply_to_screen_name,
+            urls: vec![],
+        };
+
+        // Insert urls into the vec
+        if let Some(entities) = tweet.entities {
+            for url in entities.urls {
+                out_tweet_xd.urls.push(response::TweetURL {
+                    url: url.url,
+                    display_url: url.display_url,
+                    expanded_url: url.expanded_url,
+                });
+            }
+        }
+
+        self.send_tweet(tweet.user.id, out_tweet_xd);
     }
 }
 
@@ -150,74 +140,8 @@ impl Handler<Disconnect> for PubSubServer {
     fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
         println!("Someone disconnected");
 
-        // TODO: Remove user from all topics
-
-        let mut rooms: Vec<String> = Vec::new();
-
-        // // remove address
-        // if self.sessions.remove(&msg.id).is_some() {
-        //     // remove session from all rooms
-        //     for (name, sessions) in &mut self.rooms {
-        //         if sessions.remove(&msg.id) {
-        //             rooms.push(name.to_owned());
-        //         }
-        //     }
-        // }
-        // // send message to other users
-        // for room in rooms {
-        //     self.send_message(&room, "Someone disconnected", 0);
-        // }
-    }
-}
-
-/// Handler for Message message.
-impl Handler<ClientMessage> for PubSubServer {
-    type Result = ();
-
-    fn handle(&mut self, msg: ClientMessage, _: &mut Context<Self>) {
-        self.send_message(&msg.room, msg.msg.as_str(), msg.id);
-    }
-}
-
-/// Handler for `ListRooms` message.
-impl Handler<ListRooms> for PubSubServer {
-    type Result = MessageResult<ListRooms>;
-
-    fn handle(&mut self, _: ListRooms, _: &mut Context<Self>) -> Self::Result {
-        // let mut rooms = Vec::new();
-
-        // for key in self.rooms.keys() {
-        //     rooms.push(key.to_owned())
-        // }
-
-        MessageResult(Vec::new())
-    }
-}
-
-/// Join room, send disconnect message to old room
-/// send join message to new room
-impl Handler<Join> for PubSubServer {
-    type Result = ();
-
-    fn handle(&mut self, msg: Join, _: &mut Context<Self>) {
-        // let Join { id, name } = msg;
-        // let mut rooms = Vec::new();
-
-        // // remove session from all rooms
-        // for (n, sessions) in &mut self.rooms {
-        //     if sessions.remove(&id) {
-        //         rooms.push(n.to_owned());
-        //     }
-        // }
-        // // send message to other users
-        // for room in rooms {
-        //     self.send_message(&room, "Someone disconnected", 0);
-        // }
-
-        // if self.rooms.get_mut(&name).is_none() {
-        //     self.rooms.insert(name.clone(), HashSet::new());
-        // }
-        // self.send_message(&name, "Someone connected", id);
-        // self.rooms.get_mut(&name).unwrap().insert(id);
+        for (_, listeners) in &mut self.twitter_user {
+            listeners.remove(&msg.addr);
+        }
     }
 }

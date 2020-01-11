@@ -1,43 +1,45 @@
-use std::time::{Duration, Instant};
 use actix::*;
-use tokio::signal;
-use actix::{Actor, StreamHandler, Addr, Handler, Running, fut};
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Error};
+use actix::{fut, Actor, Addr, Handler, Running, StreamHandler};
+use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
-use tokio::runtime::Runtime;
 use futures::prelude::*;
-use futures::stream::TryForEach;
-use serde::{Deserialize, Serialize};
-use twitter_stream::{Token, FutureTwitterStream};
+// use futures::stream::TryForEach;
+use std::time::{Duration, Instant};
+// use tokio::runtime::Runtime;
+// use tokio::signal;
+use tweet::Tweet as IncomingTweetData;
+use twitter_stream::Token;
+
+use request::Message as RequestMessage;
+use response::Message as ResponseMessage;
 
 use std::env;
-use std::collections::HashSet;
-// use serde_json::{Result, Value};
 
+mod request;
+mod response;
 mod server;
 
 async fn pubsub_client_route(
     req: HttpRequest,
     stream: web::Payload,
     srv: web::Data<Addr<server::PubSubServer>>,
-    ) -> Result<HttpResponse, Error>{
-    let resp = ws::start(PubSubClient{
-        id: 0,
-        hb: Instant::now(),
-        addr: srv.get_ref().clone(),
-        topics: HashSet::new(),
-    }, &req, stream);
+) -> Result<HttpResponse, Error> {
+    let resp = ws::start(
+        PubSubClient {
+            hb: Instant::now(),
+            addr: srv.get_ref().clone(),
+        },
+        &req,
+        stream,
+    );
     // let resp = ws::start(WebsocketConnection::new(), &req, stream);
-    println!("{:?}", resp);
+    println!("Connected: {:#?}", req.connection_info());
     resp
 }
 
 struct PubSubClient {
-    id: usize,
     hb: Instant,
     addr: Addr<server::PubSubServer>,
-
-    topics: HashSet<String>,
 }
 
 impl Actor for PubSubClient {
@@ -50,9 +52,12 @@ impl Actor for PubSubClient {
         self.hb(ctx);
     }
 
-    fn stopping(&mut self, _: &mut Self::Context) -> Running {
+    fn stopping(&mut self, ctx: &mut Self::Context) -> Running {
+        let addr = ctx.address();
         // notify chat server
-        self.addr.do_send(server::Disconnect { id: self.id });
+        self.addr.do_send(server::Disconnect {
+            addr: addr.recipient(),
+        });
         Running::Stop
     }
 }
@@ -67,72 +72,92 @@ impl Handler<server::Message> for PubSubClient {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-struct TweetURL {
-    url: String,
-    expanded_url: String,
-}
+impl PubSubClient {
+    fn handle_text(
+        &mut self,
+        text: String,
+        ctx: &mut <PubSubClient as Actor>::Context,
+    ) -> Result<String, serde_json::Error> {
+        let request: RequestMessage = RequestMessage::parse(&text)?;
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Tweet {
-    screen_name: String,
-    text: String,
-    in_reply_to_screen_name: Option<String>,
-    urls: Vec<TweetURL>,
-}
+        match request {
+            RequestMessage::Subscribe(m) => {
+                let addr = ctx.address();
+                self.addr
+                    .send(server::Subscribe {
+                        twitter_user_id: m.twitter_user_id,
+                        addr: addr.recipient(),
+                    })
+                    .into_actor(self)
+                    .then(move |res, _, ctx| {
+                        match res {
+                            Ok(res) => match res {
+                                true => {
+                                    let r = ResponseMessage::new_subscribe(format!(
+                                        "Successfully subscribed to twitter user {}",
+                                        m.twitter_user_id
+                                    ));
+                                    ctx.text(serde_json::to_string(&r).unwrap());
+                                }
+                                false => {
+                                    let r = ResponseMessage::new_subscribe(format!(
+                                        "You are already subscribed to the twitter user {}",
+                                        m.twitter_user_id
+                                    ));
+                                    ctx.text(serde_json::to_string(&r).unwrap());
+                                }
+                            },
+                            // something is wrong with chat server
+                            _ => ctx.stop(),
+                        }
+                        fut::ready(())
+                    })
+                    .wait(ctx);
+            }
 
-#[derive(Deserialize, Serialize)]
-struct ErrorDescription {
-    error: String,
-}
+            RequestMessage::Unsubscribe(m) => {
+                let addr = ctx.address();
+                self.addr
+                    .send(server::Unsubscribe {
+                        twitter_user_id: m.twitter_user_id,
+                        addr: addr.recipient(),
+                    })
+                    .into_actor(self)
+                    .then(move |res, _, ctx| {
+                        match res {
+                            Ok(res) => match res {
+                                true => {
+                                    let r = ResponseMessage::new_unsubscribe(format!(
+                                        "Successfully unsubscribed from twitter user {}",
+                                        m.twitter_user_id
+                                    ));
+                                    ctx.text(serde_json::to_string(&r).unwrap());
+                                }
+                                false => {
+                                    let r = ResponseMessage::new_unsubscribe(format!(
+                                        "You are not subscribed to twitter user {}",
+                                        m.twitter_user_id
+                                    ));
+                                    ctx.text(serde_json::to_string(&r).unwrap());
+                                }
+                            },
+                            // something is wrong with chat server
+                            _ => ctx.stop(),
+                        }
+                        fut::ready(())
+                    })
+                    .wait(ctx);
+            }
+        };
 
-#[derive(Serialize, Debug)]
-struct SubscribeResponse {
-    message: String,
-}
+        let str = String::from("asd");
 
-#[derive(Serialize, Debug)]
-struct UnsubscribeResponse {
-    message: String,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-enum ServiceResponse {
-    SubscribeResponse(String),
-    UnsubscribeResponse(String),
-    Tweet(Tweet),
-    ErrorDescription(ErrorDescription),
-}
-
-#[derive(Deserialize, Debug)]
-struct Subscribe {
-    topic: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct Unsubscribe {
-    topic: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-enum ServiceRequest {
-    // TODO: make trait which has a "handle" function maybe?
-    Subscribe(Subscribe),
-    Unsubscribe(Unsubscribe),
-    Poll,
-
-    // TODO: Tweets should not be insert like this
-    Tweet(Tweet),
+        return Ok(str);
+    }
 }
 
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for PubSubClient {
-    fn handle(
-        &mut self,
-        msg: Result<ws::Message, ws::ProtocolError>,
-        ctx: &mut Self::Context,
-    ) {
+    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         let msg = match msg {
             Err(_) => {
                 ctx.stop();
@@ -143,114 +168,20 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for PubSubClient {
 
         match msg {
             ws::Message::Ping(msg) => {
-                println!("Received ping");
                 self.hb = Instant::now();
                 ctx.pong(&msg);
             }
             ws::Message::Pong(_) => {
-                println!("Received pong");
                 self.hb = Instant::now();
             }
             ws::Message::Text(text) => {
-                let request = serde_json::from_str::<ServiceRequest>(&text);
-                match request {
-                    Ok(f) => match f {
-                        ServiceRequest::Subscribe(m) => {
-                            let addr = ctx.address();
-                            self.addr
-                                .send(server::Subscribe {
-                                    twitter_user_id: 81085011,
-                                    addr: addr.recipient(),
-                                })
-                                .into_actor(self)
-                                .then(move |res, _, ctx| {
-                                    match res {
-                                        Ok(res) => match res {
-                                            true => {
-                                                let r = ServiceResponse::SubscribeResponse(format!(
-                                                        "Successfully subscribed to topic {}",
-                                                        m.topic
-                                                        ));
-                                                ctx.text(serde_json::to_string(&r).unwrap());
-                                            }
-                                            false => {
-                                                let r = ServiceResponse::SubscribeResponse(format!(
-                                                        "You are already subscribed to the topic {}",
-                                                        m.topic
-                                                        ));
-                                                ctx.text(serde_json::to_string(&r).unwrap());
-                                            }
-                                        }
-                                        // something is wrong with chat server
-                                        _ => ctx.stop(),
-                                    }
-                                    fut::ready(())
-                                })
-                                .wait(ctx);
-                        },
-
-                        ServiceRequest::Unsubscribe(m) => match self.topics.remove(&m.topic) {
-                            true => {
-                                let r = ServiceResponse::UnsubscribeResponse(format!(
-                                    "Successfully unsubscribed from topic {}",
-                                    m.topic
-                                ));
-                                ctx.text(serde_json::to_string(&r).unwrap());
-                            }
-                            false => {
-                                let r = ServiceResponse::UnsubscribeResponse(format!(
-                                    "You are not subscribed to {}",
-                                    m.topic
-                                ));
-                                ctx.text(serde_json::to_string(&r).unwrap());
-                            }
-                        },
-
-                        ServiceRequest::Poll => {
-                            // TODO: automatically post tweets to listeners as they come in
-                            println!("got poll");
-                            let t = Tweet {
-                                screen_name: "pajlada".to_owned(),
-                                text: format!("This is a test fake tweet! lol: {}", text),
-                                in_reply_to_screen_name: None,
-                                urls: vec![],
-                            };
-                            let r = ServiceResponse::Tweet(t);
-                            ctx.text(serde_json::to_string(&r).unwrap());
-
-
-                            let addr = ctx.address();
-                            self.addr
-                                .send(server::Poll {})
-                                .into_actor(self)
-                                .then(move |res, _, ctx| {
-                                    match res {
-                                        Ok(_) => {
-                                            println!("ok");
-                                        }
-                                        // something is wrong with chat server
-                                        _ => ctx.stop(),
-                                    }
-                                    fut::ready(())
-                                })
-                                .wait(ctx);
-                        }
-
-                        ServiceRequest::Tweet(m) => {
-                            // TODO: 1. Find user who is subscribed to "tweet" topic
-                            // TODO: 2. Find user who is interested in this specific users' tweets
-                            println!("got tweet: {:?}", m);
-                        }
-                    },
-                    Err(e) => {
-                        let response = ServiceResponse::ErrorDescription(ErrorDescription {
-                            error: format!("error lol {}", e),
-                        });
-                        ctx.text(serde_json::to_string(&response).unwrap());
-                        println!("error xd {:?}", e);
-                    }
+                if let Err(e) = self.handle_text(text, ctx) {
+                    let response = ResponseMessage::new_error(format!("error lol {}", e));
+                    ctx.text(serde_json::to_string(&response).unwrap());
+                    println!("error xd {:?}", e);
                 }
             }
+
             ws::Message::Binary(bin) => ctx.binary(bin),
             _ => (),
         }
@@ -274,7 +205,9 @@ impl PubSubClient {
                 println!("Websocket Client heartbeat failed, disconnecting!");
 
                 // notify chat server
-                act.addr.do_send(server::Disconnect { id: act.id });
+                act.addr.do_send(server::Disconnect {
+                    addr: ctx.address().recipient(),
+                });
 
                 // stop actor
                 ctx.stop();
@@ -288,25 +221,21 @@ impl PubSubClient {
     }
 }
 
-struct Waker;
-
-struct Context<'a> {
-        waker: &'a Waker,
-        
-}
-
-impl<'a> Context<'a> {
-    fn from_waker(waker: &'a Waker) -> Self {
-                Context { waker  }
-                    
-    }
-
-    fn waker(&self) -> &'a Waker {
-                &self.waker
-                        
-    }
-    
-}
+// struct Waker;
+//
+// struct Context<'a> {
+//     waker: &'a Waker,
+// }
+//
+// impl<'a> Context<'a> {
+//     fn from_waker(waker: &'a Waker) -> Self {
+//         Context { waker }
+//     }
+//
+//     fn waker(&self) -> &'a Waker {
+//         &self.waker
+//     }
+// }
 
 async fn start_twitter_listener(server: Addr<server::PubSubServer>) {
     let token = Token::new(
@@ -316,22 +245,23 @@ async fn start_twitter_listener(server: Addr<server::PubSubServer>) {
         env::var("PAJBOT_TWITTER_ACCESS_TOKEN_SECRET").unwrap(),
     );
 
-
     println!("Start twitter listener!");
 
     let a = [81085011];
-    let uids : &[u64]= &a;
+    let uids: &[u64] = &a;
 
     twitter_stream::Builder::filter(token)
         .follow(Some(uids))
         .listen()
         .try_flatten_stream()
         .try_for_each(|json| {
-            server.do_send(server::Poll{});
-            println!("{}", json);
+            // Create tweet from JSON
+            let tweet = serde_json::from_str::<IncomingTweetData>(&json).unwrap();
+            server.do_send(server::IncomingTweet { tweet: tweet });
+            // println!("{}", json);
             future::ok(())
         })
-    .await
+        .await
         .unwrap();
 }
 
@@ -352,14 +282,13 @@ fn main() {
     //             .map(|()| println!("5 seconds are over"))
     //                     .map_err(|e| eprintln!("Failed to wait: {}", e));
 
-
     // Arbiter::spawn(deadline);
 
-//     Arbiter::spawn(async {
-//         tokio::signal::ctrl_c().await.unwrap();
-//         println!("ctrl c pressed?");
-//         System::current().stop();
-//     });
+    Arbiter::spawn(async {
+        tokio::signal::ctrl_c().await.unwrap();
+        println!("ctrl c pressed?");
+        Arbiter::current().stop();
+    });
 
     Arbiter::spawn(async {
         HttpServer::new(move || {
@@ -367,10 +296,11 @@ fn main() {
                 .data(server.clone())
                 .service(web::resource("/ws/").to(pubsub_client_route))
         })
-        .bind("127.0.0.1:1235").unwrap()
-            .run()
-            .await
-            .unwrap();
+        .bind("127.0.0.1:1235")
+        .unwrap()
+        .run()
+        .await
+        .unwrap();
         println!("end of web listener");
     });
 
