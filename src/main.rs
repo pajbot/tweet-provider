@@ -238,11 +238,9 @@ async fn start_twitter_listener(server: Addr<server::PubSubServer>) {
         .follow(Some(uids))
         .listen()
         .try_flatten_stream()
-        .try_for_each(|json| {
+        .try_for_each(|tweet| {
             // Create tweet from JSON
-            let tweet = serde_json::from_str::<IncomingTweetData>(&json).unwrap();
-            server.do_send(server::IncomingTweet { tweet: tweet });
-            // println!("{}", json);
+            server.do_send(server::IncomingTweet(tweet.to_string()));
             future::ok(())
         })
         .await
