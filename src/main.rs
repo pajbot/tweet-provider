@@ -27,7 +27,7 @@ async fn pubsub_client_route(
     let resp = ws::start(
         PubSubClient {
             hb: Instant::now(),
-            addr: srv.get_ref().clone(),
+            server_addr: srv.get_ref().clone(),
         },
         &req,
         stream,
@@ -39,7 +39,7 @@ async fn pubsub_client_route(
 
 struct PubSubClient {
     hb: Instant,
-    addr: Addr<server::PubSubServer>,
+    server_addr: Addr<server::PubSubServer>,
 }
 
 impl Actor for PubSubClient {
@@ -54,10 +54,12 @@ impl Actor for PubSubClient {
 
     fn stopping(&mut self, ctx: &mut Self::Context) -> Running {
         let addr = ctx.address();
+
         // notify chat server
-        self.addr.do_send(server::Disconnect {
+        self.server_addr.do_send(server::Disconnect {
             addr: addr.recipient(),
         });
+
         Running::Stop
     }
 }
@@ -83,7 +85,7 @@ impl PubSubClient {
         match request {
             RequestMessage::Subscribe(m) => {
                 let addr = ctx.address();
-                self.addr
+                self.server_addr
                     .send(server::Subscribe {
                         twitter_user_id: m.twitter_user_id,
                         addr: addr.recipient(),
@@ -117,7 +119,7 @@ impl PubSubClient {
 
             RequestMessage::Unsubscribe(m) => {
                 let addr = ctx.address();
-                self.addr
+                self.server_addr
                     .send(server::Unsubscribe {
                         twitter_user_id: m.twitter_user_id,
                         addr: addr.recipient(),
@@ -205,7 +207,7 @@ impl PubSubClient {
                 println!("Websocket Client heartbeat failed, disconnecting!");
 
                 // notify chat server
-                act.addr.do_send(server::Disconnect {
+                act.server_addr.do_send(server::Disconnect {
                     addr: ctx.address().recipient(),
                 });
 
