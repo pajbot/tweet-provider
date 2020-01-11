@@ -93,24 +93,22 @@ impl PubSubClient {
                     .into_actor(self)
                     .then(move |res, _, ctx| {
                         match res {
-                            Ok(res) => match res {
-                                true => {
-                                    let r = ResponseMessage::new_subscribe(format!(
-                                        "Successfully subscribed to twitter user {}",
-                                        m.twitter_user_id
-                                    ));
-                                    ctx.text(serde_json::to_string(&r).unwrap());
-                                }
-                                false => {
-                                    let r = ResponseMessage::new_subscribe(format!(
-                                        "You are already subscribed to the twitter user {}",
-                                        m.twitter_user_id
-                                    ));
-                                    ctx.text(serde_json::to_string(&r).unwrap());
-                                }
-                            },
+                            Ok(true) => {
+                                let r = ResponseMessage::new_subscribe(format!(
+                                    "Successfully subscribed to twitter user {}",
+                                    m.twitter_user_id
+                                ));
+                                ctx.text(serde_json::to_string(&r).unwrap());
+                            }
+                            Ok(false) => {
+                                let r = ResponseMessage::new_subscribe(format!(
+                                    "You are already subscribed to the twitter user {}",
+                                    m.twitter_user_id
+                                ));
+                                ctx.text(serde_json::to_string(&r).unwrap());
+                            }
                             // something is wrong with chat server
-                            _ => ctx.stop(),
+                            Err(_) => ctx.stop(),
                         }
                         fut::ready(())
                     })
@@ -127,22 +125,20 @@ impl PubSubClient {
                     .into_actor(self)
                     .then(move |res, _, ctx| {
                         match res {
-                            Ok(res) => match res {
-                                true => {
-                                    let r = ResponseMessage::new_unsubscribe(format!(
-                                        "Successfully unsubscribed from twitter user {}",
-                                        m.twitter_user_id
-                                    ));
-                                    ctx.text(serde_json::to_string(&r).unwrap());
-                                }
-                                false => {
-                                    let r = ResponseMessage::new_unsubscribe(format!(
-                                        "You are not subscribed to twitter user {}",
-                                        m.twitter_user_id
-                                    ));
-                                    ctx.text(serde_json::to_string(&r).unwrap());
-                                }
-                            },
+                            Ok(true) => {
+                                let r = ResponseMessage::new_unsubscribe(format!(
+                                    "Successfully unsubscribed from twitter user {}",
+                                    m.twitter_user_id
+                                ));
+                                ctx.text(serde_json::to_string(&r).unwrap());
+                            }
+                            Ok(false) => {
+                                let r = ResponseMessage::new_unsubscribe(format!(
+                                    "You are not subscribed to twitter user {}",
+                                    m.twitter_user_id
+                                ));
+                                ctx.text(serde_json::to_string(&r).unwrap());
+                            }
                             // something is wrong with chat server
                             _ => ctx.stop(),
                         }
@@ -154,7 +150,7 @@ impl PubSubClient {
 
         let str = String::from("asd");
 
-        return Ok(str);
+        Ok(str)
     }
 }
 
@@ -173,9 +169,11 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for PubSubClient {
                 self.hb = Instant::now();
                 ctx.pong(&msg);
             }
+
             ws::Message::Pong(_) => {
                 self.hb = Instant::now();
             }
+
             ws::Message::Text(text) => {
                 if let Err(e) = self.handle_text(text, ctx) {
                     let response = ResponseMessage::new_error(format!("error lol {}", e));
@@ -184,7 +182,6 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for PubSubClient {
                 }
             }
 
-            ws::Message::Binary(bin) => ctx.binary(bin),
             _ => (),
         }
     }
@@ -192,6 +189,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for PubSubClient {
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+
 /// How long before lack of client response causes a timeout
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -223,22 +221,6 @@ impl PubSubClient {
     }
 }
 
-// struct Waker;
-//
-// struct Context<'a> {
-//     waker: &'a Waker,
-// }
-//
-// impl<'a> Context<'a> {
-//     fn from_waker(waker: &'a Waker) -> Self {
-//         Context { waker }
-//     }
-//
-//     fn waker(&self) -> &'a Waker {
-//         &self.waker
-//     }
-// }
-
 async fn start_twitter_listener(server: Addr<server::PubSubServer>) {
     let token = Token::new(
         env::var("PAJBOT_TWITTER_CONSUMER_KEY").unwrap(),
@@ -249,7 +231,7 @@ async fn start_twitter_listener(server: Addr<server::PubSubServer>) {
 
     println!("Start twitter listener!");
 
-    let a = [81085011];
+    let a = [81_085_011];
     let uids: &[u64] = &a;
 
     twitter_stream::Builder::filter(token)
@@ -278,18 +260,6 @@ fn main() {
         println!("xd");
         start_twitter_listener(srv).await;
         println!("end of twitter listener");
-    });
-
-    // let deadline = tokio::time::delay_until(Instant::now() + Duration::from_secs(5))
-    //             .map(|()| println!("5 seconds are over"))
-    //                     .map_err(|e| eprintln!("Failed to wait: {}", e));
-
-    // Arbiter::spawn(deadline);
-
-    Arbiter::spawn(async {
-        tokio::signal::ctrl_c().await.unwrap();
-        println!("ctrl c pressed?");
-        Arbiter::current().stop();
     });
 
     Arbiter::spawn(async {

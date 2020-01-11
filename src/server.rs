@@ -6,9 +6,6 @@
 use actix::prelude::*;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, HashSet};
-use tweet::Tweet as IncomingTweetData;
-
-use crate::response;
 
 /// Chat server sends this messages to session
 #[derive(Message)]
@@ -82,7 +79,7 @@ impl Handler<Subscribe> for PubSubServer {
         let entry = self
             .twitter_user
             .entry(msg.twitter_user_id)
-            .or_insert(HashSet::new());
+            .or_insert_with(HashSet::new);
         entry.insert(msg.addr)
     }
 }
@@ -92,12 +89,8 @@ impl Handler<Unsubscribe> for PubSubServer {
 
     fn handle(&mut self, msg: Unsubscribe, _: &mut Context<Self>) -> Self::Result {
         match self.twitter_user.entry(msg.twitter_user_id) {
-            Occupied(mut entry) => {
-                return entry.get_mut().remove(&msg.addr);
-            }
-            Vacant(_) => {
-                return false;
-            }
+            Occupied(mut entry) => entry.get_mut().remove(&msg.addr),
+            Vacant(_) => false,
         }
     }
 }
@@ -140,7 +133,7 @@ impl Handler<Disconnect> for PubSubServer {
     fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
         println!("Someone disconnected");
 
-        for (_, listeners) in &mut self.twitter_user {
+        for listeners in self.twitter_user.values_mut() {
             listeners.remove(&msg.addr);
         }
     }
