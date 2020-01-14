@@ -1,0 +1,27 @@
+on: [push, pull_request]
+
+name: CD # the name...
+
+jobs:
+  cd:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+
+      - uses: actions/upload-artifact@v1
+        with:
+          name: x86_64-unknown-linux-gnu_build
+          path: target/release/tweet-provider
+

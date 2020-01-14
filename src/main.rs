@@ -1,218 +1,106 @@
-use actix::{Actor, StreamHandler};
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
-use actix_web_actors::ws;
-use tokio::runtime::Runtime;
-use futures::prelude::*;
-use futures::executor::block_on;
-use serde::{Deserialize, Serialize};
-use twitter_stream::Token;
+#![recursion_limit = "1024"] // futures::select!
 
-use std::env;
-use std::collections::HashSet;
-// use serde_json::{Result, Value};
+use anyhow::Result;
+use config::Config;
+use std::{collections::HashSet, ops::Not};
+use structopt::StructOpt;
+use tokio::{
+    net::TcpListener,
+    sync::{broadcast, mpsc},
+};
 
-fn index() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
+mod api;
+mod config;
+mod twitter;
+mod websocket;
 
-fn ws(req: HttpRequest, stream: web::Payload) -> impl Responder {
-    let resp = ws::start(WebsocketConnection::new(), &req, stream);
-    println!("{:?}", resp);
-    resp
-}
+type Follows = HashSet<u64>;
 
-struct WebsocketConnection {
-    topics: HashSet<String>,
-}
+const REQUESTED_FOLLOWS_CHANNEL_CAPACITY: usize = 16;
+const TWEET_CHANNEL_CAPACITY: usize = 16;
 
-impl WebsocketConnection {
-    fn new() -> WebsocketConnection {
-        WebsocketConnection {
-            topics: HashSet::new(),
-        }
+#[tokio::main]
+async fn main() {
+    if let Err(error) = run().await {
+        log::error!("fatal: {:#}", error);
+        std::process::exit(1);
     }
 }
 
-impl Actor for WebsocketConnection {
-    type Context = ws::WebsocketContext<Self>;
-}
+async fn run() -> Result<()> {
+    let args = config::Args::from_args();
 
-#[derive(Deserialize, Serialize, Debug)]
-struct TweetURL {
-    url: String,
-    expanded_url: String,
-}
+    simple_logger::init_with_level(args.log_level)?;
 
-#[derive(Deserialize, Serialize, Debug)]
-struct Tweet {
-    screen_name: String,
-    text: String,
-    in_reply_to_screen_name: Option<String>,
-    urls: Vec<TweetURL>,
-}
+    log::info!("initializing");
 
-#[derive(Deserialize, Serialize)]
-struct ErrorDescription {
-    error: String,
-}
-
-#[derive(Serialize, Debug)]
-struct SubscribeResponse {
-    message: String,
-}
-
-#[derive(Serialize, Debug)]
-struct UnsubscribeResponse {
-    message: String,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-enum ServiceResponse {
-    SubscribeResponse(String),
-    UnsubscribeResponse(String),
-    Tweet(Tweet),
-    ErrorDescription(ErrorDescription),
-}
-
-#[derive(Deserialize, Debug)]
-struct Subscribe {
-    topic: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct Unsubscribe {
-    topic: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-enum ServiceRequest {
-    // TODO: make trait which has a "handle" function maybe?
-    Subscribe(Subscribe),
-    Unsubscribe(Unsubscribe),
-    Poll,
-
-    // TODO: Tweets should not be insert like this
-    Tweet(Tweet),
-}
-
-impl StreamHandler<ws::Message, ws::ProtocolError> for WebsocketConnection {
-    fn handle(&mut self, msg: ws::Message, ctx: &mut Self::Context) {
-        match msg {
-            ws::Message::Ping(msg) => ctx.pong(&msg),
-            ws::Message::Text(text) => {
-                let request = serde_json::from_str::<ServiceRequest>(&text);
-                match request {
-                    Ok(f) => match f {
-                        ServiceRequest::Subscribe(m) => match self.topics.insert(m.topic.clone()) {
-                            true => {
-                                let r = ServiceResponse::SubscribeResponse(format!(
-                                    "Successfully subscribed to topic {}",
-                                    m.topic
-                                ));
-                                ctx.text(serde_json::to_string(&r).unwrap());
-                            }
-                            false => {
-                                let r = ServiceResponse::SubscribeResponse(format!(
-                                    "You are already subscribed to the topic {}",
-                                    m.topic
-                                ));
-                                ctx.text(serde_json::to_string(&r).unwrap());
-                            }
-                        },
-
-                        ServiceRequest::Unsubscribe(m) => match self.topics.remove(&m.topic) {
-                            true => {
-                                let r = ServiceResponse::UnsubscribeResponse(format!(
-                                    "Successfully unsubscribed from topic {}",
-                                    m.topic
-                                ));
-                                ctx.text(serde_json::to_string(&r).unwrap());
-                            }
-                            false => {
-                                let r = ServiceResponse::UnsubscribeResponse(format!(
-                                    "You are not subscribed to {}",
-                                    m.topic
-                                ));
-                                ctx.text(serde_json::to_string(&r).unwrap());
-                            }
-                        },
-
-                        ServiceRequest::Poll => {
-                            // TODO: automatically post tweets to listeners as they come in
-                            println!("got poll");
-                            let t = Tweet {
-                                screen_name: "pajlada".to_owned(),
-                                text: format!("This is a test fake tweet! lol: {}", text),
-                                in_reply_to_screen_name: None,
-                                urls: vec![],
-                            };
-                            let r = ServiceResponse::Tweet(t);
-                            ctx.text(serde_json::to_string(&r).unwrap());
-                        }
-
-                        ServiceRequest::Tweet(m) => {
-                            // TODO: 1. Find user who is subscribed to "tweet" topic
-                            // TODO: 2. Find user who is interested in this specific users' tweets
-                            println!("got tweet: {:?}", m);
-                        }
-                    },
-                    Err(e) => {
-                        let response = ServiceResponse::ErrorDescription(ErrorDescription {
-                            error: format!("error lol {}", e),
-                        });
-                        ctx.text(serde_json::to_string(&response).unwrap());
-                        println!("error xd {:?}", e);
-                    }
-                }
-            }
-            ws::Message::Binary(bin) => ctx.binary(bin),
-            _ => (),
+    let config = match Config::from_toml(&args.config_path).await {
+        Ok(config) => args.config.merge(config),
+        Err(error) => {
+            log::warn!(
+                "reading config from {:?} failed: {:#}",
+                args.config_path,
+                error
+            );
+            args.config
         }
-    }
-}
+    };
 
-async fn start_twitter_listener() {
-
-    let token = Token::new(
-        env::var("PAJBOT_TWITTER_CONSUMER_KEY").unwrap(),
-        env::var("PAJBOT_TWITTER_CONSUMER_SECRET").unwrap(),
-        env::var("PAJBOT_TWITTER_ACCESS_TOKEN").unwrap(),
-        env::var("PAJBOT_TWITTER_ACCESS_TOKEN_SECRET").unwrap(),
+    anyhow::ensure!(
+        config.twitter.consumer_key.is_some()
+            && config.twitter.consumer_secret.is_some()
+            && config.twitter.access_token.is_some()
+            && config.twitter.access_token_secret.is_some(),
+        "secrets in twitter config must be configured"
     );
 
-    let a = [81085011];
-    let uids : &[u64]= &a;
+    anyhow::ensure!(
+        config.twitter.default_follows.is_empty().not(),
+        "default_follows in twitter config must not be empty",
+    );
 
-    twitter_stream::Builder::filter(token)
-        .follow(Some(uids))
-        .listen()
-        .try_flatten_stream()
-        .try_for_each(|json| {
-            println!("{}", json);
-            future::ok(())
-        })
-        .await
-        .unwrap();
-}
+    log::info!("config has been loaded:");
+    log::info!("- listen address: {}", config.websocket.listen_addr);
+    log::info!("- default follows: {:?}", config.twitter.default_follows);
+    log::info!("- follows cache: {:?}", config.twitter.follows_cache);
 
-fn main() {
-    block_on(async_main());
-}
+    let (mut tx_requested_follows, rx_requested_follows) =
+        mpsc::channel(REQUESTED_FOLLOWS_CHANNEL_CAPACITY);
 
-async fn async_main() {
-    let rt = Runtime::new().unwrap();
+    // TODO: change to watch::channel?
+    // - attempt #1: ownership issues in twitter::supervisor
+    let (tx_tweet, _) = broadcast::channel(TWEET_CHANNEL_CAPACITY);
 
-    rt.spawn(start_twitter_listener());
+    match twitter::read_cache(&config.twitter.follows_cache).await {
+        Ok(cache) => tx_requested_follows.send(cache).await?,
+        Err(error) => log::warn!(
+            "reading cache from {:?} failed: {:#}",
+            config.twitter.follows_cache,
+            error
+        ),
+    }
 
-    HttpServer::new(|| {
-        App::new()
-            .route("/", web::get().to(index))
-            .route("/ws/", web::get().to(ws))
-    })
-    .bind("127.0.0.1:1235")
-    .unwrap()
-    .run()
-    .unwrap();
+    log::info!("starting");
+
+    // TODO: replace tokio::spawn with a select, allowing us to return errors
+
+    // `TcpListener::bind` happens here because it is fatal,
+    // moving it in `websocket::listener` would force us to panic
+    tokio::spawn(websocket::listener(
+        TcpListener::bind(config.websocket.listen_addr).await?,
+        tx_requested_follows,
+        tx_tweet.clone(),
+    ));
+
+    tokio::spawn(twitter::supervisor(
+        config.twitter,
+        rx_requested_follows,
+        tx_tweet,
+    ));
+
+    tokio::signal::ctrl_c().await?;
+    println!(/* most terms will show a ^C with no newline */);
+    log::info!("interrupted, exiting");
+
+    Ok(())
 }

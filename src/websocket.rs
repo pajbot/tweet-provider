@@ -1,0 +1,201 @@
+use crate::{api, Follows};
+use anyhow::{Context, Result};
+use async_tungstenite::{
+    self as ws,
+    tungstenite::{protocol::WebSocketConfig, Message},
+};
+use egg_mode::tweet::Tweet;
+use futures::{sink::Sink, FutureExt, SinkExt, StreamExt};
+use std::{net::SocketAddr, ops::Not, time::Duration};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::{broadcast, mpsc},
+    time::{interval_at, timeout, Instant},
+};
+
+const WS_HEARTBEAT: Duration = Duration::from_secs(30);
+const WS_SEND_QUEUE_CAPACITY: usize = 32;
+const WS_STALL: Duration = Duration::from_secs(90);
+
+// TODO: would many tokio::spawn be dangerous?
+pub async fn listener(
+    mut listener: TcpListener,
+    tx_requested_follows: mpsc::Sender<Follows>,
+    tx_tweet: broadcast::Sender<Tweet>,
+) {
+    log::info!("listening on {}", listener.local_addr().unwrap());
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, addr)) => {
+                log::info!("new connection from {}", addr);
+
+                let tx_requested_follows = tx_requested_follows.clone();
+                let rx_tweet = tx_tweet.subscribe();
+
+                tokio::spawn(async move {
+                    let res = handler(stream, addr, tx_requested_follows, rx_tweet).await;
+
+                    if let Err(error) = res {
+                        log::error!("error processing websocket for {}: {:#}", addr, error);
+                    }
+                });
+            }
+
+            Err(error) => log::error!("failed new connection: {:#}", error),
+        }
+    }
+}
+
+// TODO: send close frames when we gotta
+async fn handler(
+    stream: TcpStream,
+    addr: SocketAddr,
+    mut tx_requested_follows: mpsc::Sender<Follows>,
+    rx_tweet: broadcast::Receiver<Tweet>,
+) -> Result<()> {
+    let mut follows = Follows::new();
+
+    let stream = ws::tokio::TokioAdapter(stream);
+    let ws_config = WebSocketConfig {
+        max_send_queue: Some(WS_SEND_QUEUE_CAPACITY),
+        ..WebSocketConfig::default()
+    };
+
+    let ws = ws::accept_async_with_config(stream, Some(ws_config)).await?;
+    let (mut tx_ws, rx_ws) = ws.split();
+
+    let mut rx_ws = rx_ws.fuse();
+    let mut rx_tweet = rx_tweet.fuse();
+    let mut heartbeat = interval_at(Instant::now(), WS_HEARTBEAT).fuse();
+
+    loop {
+        futures::select! {
+            ws_msg = timeout(WS_STALL, rx_ws.next()).fuse() => {
+                let ws_msg = ws_msg.context("ws connection stalled")?;
+                let ws_msg = ws_msg.context("ws stream ended")?;
+                let ws_msg = ws_msg?; // websocket closed or error
+
+                handle_ws_message(
+                    ws_msg,
+                    addr,
+                    &mut follows,
+                    &mut tx_ws,
+                    &mut tx_requested_follows,
+                )
+                .await?;
+            }
+
+            tweet = rx_tweet.next() => {
+                let tweet = tweet.context("fused stream to rx_tweet ran out")?;
+
+                if let Err(broadcast::RecvError::Lagged(n)) = tweet {
+                    log::error!("lagging {} items behind", n);
+                    continue;
+                }
+
+                let tweet = tweet.expect("no tx_tweet remaining");
+
+                log::debug!("sending tweet to {}", addr);
+
+                // send tweets to all clients during debug
+                if cfg!(debug_assertions) || follows.contains(&tweet.user.as_ref().unwrap().id) {
+                    send_json(
+                        &mut tx_ws,
+                        &api::ServerMessage::Tweet(api::SerializeWrapper(&tweet)),
+                    )
+                    .await?;
+                }
+            }
+
+            _ = heartbeat.next() => {
+                log::debug!("pinging {}", addr);
+
+                // TODO: send random data and verify when receiving pongs
+                tx_ws.send(Message::Ping(b"xd".to_vec())).await?;
+            }
+        }
+    }
+}
+
+async fn handle_ws_message<S>(
+    ws_msg: Message,
+    addr: SocketAddr,
+    follows: &mut Follows,
+    mut tx_ws: S,
+    tx_requested_follows: &mut mpsc::Sender<Follows>,
+) -> Result<()>
+where
+    S: Sink<Message> + Send + Sync + Unpin,
+    <S as Sink<Message>>::Error: 'static + Send + Sync + std::error::Error,
+{
+    let data = match ws_msg {
+        Message::Text(data) => data,
+
+        // TODO: CBOR? MsgPack?
+        Message::Binary(_) => return Ok(()),
+
+        // handled by tungstenite
+        Message::Ping(_) => return Ok(()),
+
+        Message::Pong(data) => {
+            anyhow::ensure!(data == b"xd", "invalid pong");
+            return Ok(());
+        }
+
+        // TODO: do we need to do anything?
+        Message::Close(_) => return Ok(()),
+    };
+
+    match serde_json::from_str(&data) {
+        Err(error) => {
+            log::error!("json parse error: {:#}", error);
+
+            send_json(
+                &mut tx_ws,
+                &api::ServerMessage::ProtocolError(&error.to_string()),
+            )
+            .await?;
+
+            return Ok(());
+        }
+
+        Ok(api::ClientMessage::Exit) => {
+            log::warn!("client {} requested exit", addr);
+            std::process::exit(0);
+        }
+
+        Ok(api::ClientMessage::SetSubscriptions(new_follows)) => {
+            std::mem::replace(follows, new_follows);
+        }
+
+        Ok(api::ClientMessage::InsertSubscriptions(new_follows)) => {
+            follows.extend(new_follows);
+        }
+
+        Ok(api::ClientMessage::RemoveSubscriptions(new_follows)) => {
+            follows.retain(|f| new_follows.contains(f).not());
+        }
+    }
+
+    // PANIC: fatal if all rx_requested_follows have dropped.
+    // extremely unlikely, a panic is fine for now
+    tx_requested_follows
+        .send(follows.clone())
+        .await
+        .expect("no rx_requested_follows remaining");
+
+    send_json(&mut tx_ws, &api::ServerMessage::AckSubscriptions(&follows)).await?;
+
+    Ok(())
+}
+
+async fn send_json<S>(mut tx_ws: S, data: impl serde::Serialize) -> Result<()>
+where
+    S: Sink<Message> + Send + Sync + Unpin,
+    <S as Sink<Message>>::Error: 'static + Send + Sync + std::error::Error,
+{
+    Ok(tx_ws
+        .send(Message::Text(serde_json::to_string(&data)?))
+        .await?)
+}
