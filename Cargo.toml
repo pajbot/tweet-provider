@@ -1,17 +1,23 @@
 [package]
 name = "tweet-provider"
 version = "0.1.0"
-authors = ["Rasmus Karlsson <rasmus.karlsson@pajlada.com>"]
+authors = ["Rasmus Karlsson <rasmus.karlsson@pajlada.com>", "Lucas Desgouilles <ldesgoui@ldesgoui.xyz>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-actix-web = "1.0"
-actix = "0.8.2"
-actix-web-actors = "1.0"
-serde = { version = "1", features = ["derive"] }
-serde_json = ""
+anyhow = "1"
+async-tungstenite = { version = "0.3",  features = ["tokio-runtime"] }
 futures = "0.3"
-twitter-stream = "=0.10.0-alpha.5"
-tokio = { version = "0.2", features = ["macros"]  }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+simple_logger = "1.4"
+structopt = "0.3"
+thiserror = "1"
+tokio = { version = "0.2", features = ["full"] }
+toml = "0.5"
+
+[dependencies.egg-mode]
+git = "https://github.com/QuietMisdreavus/twitter-rs"
+default-features = false
+features = ["hyper-rustls"]

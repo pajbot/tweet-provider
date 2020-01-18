@@ -1,0 +1,10 @@
+[websocket]
+# listen_addr = "127.0.0.1:8000"
+
+[twitter]
+# consumer_key = ""
+# consumer_secret = ""
+# access_token = ""
+# access_token_secret = ""
+default_follows = [ 612473, 807095, 87818409 ]
+# follows_cache = "cache.json"
