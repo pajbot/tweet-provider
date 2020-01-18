@@ -1,5 +1,5 @@
 [websocket]
-# listen_addr = "127.0.0.1:8000"
+# listen_addr = "127.0.0.1:2356"
 
 [twitter]
 # consumer_key = ""

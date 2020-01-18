@@ -49,7 +49,7 @@ pub struct WebSocket {
         short = "l",
         long = "listen",
         env = "PAJBOT_LISTEN",
-        default_value = "127.0.0.1:8000"
+        default_value = "127.0.0.1:2356"
     )]
     pub listen_addr: SocketAddr,
 }
@@ -114,7 +114,7 @@ impl Config {
 
 impl WebSocket {
     pub fn default_listen_addr() -> SocketAddr {
-        "127.0.0.1:8000".parse().unwrap()
+        "127.0.0.1:2356".parse().unwrap()
     }
 
     pub fn merge(self, other: Self) -> Self {
