@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use config::Config;
-use std::{collections::HashSet, ops::Not};
+use std::collections::HashSet;
 use structopt::StructOpt;
 use tokio::{
     net::TcpListener,
@@ -52,11 +52,6 @@ async fn run() -> Result<()> {
             && config.twitter.access_token.is_some()
             && config.twitter.access_token_secret.is_some(),
         "secrets in twitter config must be configured"
-    );
-
-    anyhow::ensure!(
-        config.twitter.default_follows.is_empty().not(),
-        "default_follows in twitter config must not be empty",
     );
 
     log::info!("config has been loaded:");

@@ -25,11 +25,11 @@ pub async fn supervisor(
     // TODO: change to LRU to prevent going over 5000 follows
     let mut requested_follows = Follows::new();
 
-    let mut stream_down = true;
+    let mut backing_off = false;
     let mut backoff = 0;
 
     // We don't start immediately.
-    let restart = delay_for(Duration::from_secs(3)).fuse();
+    let restart = Fuse::terminated();
     let twitter_stream = Fuse::terminated();
     let mut rx_requested_follows = rx_requested_follows.fuse();
 
@@ -39,14 +39,19 @@ pub async fn supervisor(
     loop {
         futures::select! {
             () = restart => {
-                let follows = requested_follows.union(&default_follows).copied().collect();
-                twitter_stream.set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
+                let follows : Vec<u64> = requested_follows.union(&default_follows).copied().collect();
+                if !follows.is_empty() {
+                    twitter_stream.set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
 
-                stream_down = false;
+                    backing_off = false;
+                } else {
+                    log::warn!("not starting stream, nothing to follow yet");
+                    restart.set(delay_for(Duration::from_secs(5)).fuse());
+                }
             }
 
             res = twitter_stream => {
-                stream_down = true;
+                backing_off = true;
 
                 let error = res.expect_err("infinite loop cannot return Ok(())");
                 log::error!("twitter stream error: {:#}", error);
@@ -99,7 +104,7 @@ pub async fn supervisor(
                         );
                     }
 
-                    if stream_down.not() {
+                    if backing_off.not() {
                         restart.set(delay_for(Duration::from_secs(10)).fuse());
                     }
                 }

@@ -6,5 +6,6 @@
 # consumer_secret = ""
 # access_token = ""
 # access_token_secret = ""
-default_follows = [ 612473, 807095, 87818409 ]
+## list of twitter user IDs to follow by default
+# default_follows = []
 # follows_cache = "cache.json"
