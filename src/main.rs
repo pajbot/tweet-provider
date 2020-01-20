@@ -57,23 +57,13 @@ async fn run() -> Result<()> {
     log::info!("config has been loaded:");
     log::info!("- listen address: {}", config.websocket.listen_addr);
     log::info!("- default follows: {:?}", config.twitter.default_follows);
-    log::info!("- follows cache: {:?}", config.twitter.follows_cache);
 
-    let (mut tx_requested_follows, rx_requested_follows) =
+    let (tx_requested_follows, rx_requested_follows) =
         mpsc::channel(REQUESTED_FOLLOWS_CHANNEL_CAPACITY);
 
     // TODO: change to watch::channel?
     // - attempt #1: ownership issues in twitter::supervisor
     let (tx_tweet, _) = broadcast::channel(TWEET_CHANNEL_CAPACITY);
-
-    match twitter::read_cache(&config.twitter.follows_cache).await {
-        Ok(cache) => tx_requested_follows.send(cache).await?,
-        Err(error) => log::warn!(
-            "reading cache from {:?} failed: {:#}",
-            config.twitter.follows_cache,
-            error
-        ),
-    }
 
     log::info!("starting");
 

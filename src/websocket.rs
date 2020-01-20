@@ -17,10 +17,9 @@ const WS_HEARTBEAT: Duration = Duration::from_secs(30);
 const WS_SEND_QUEUE_CAPACITY: usize = 32;
 const WS_STALL: Duration = Duration::from_secs(90);
 
-// TODO: would many tokio::spawn be dangerous?
 pub async fn listener(
     mut listener: TcpListener,
-    tx_requested_follows: mpsc::Sender<Follows>,
+    tx_requested_follows: mpsc::Sender<(SocketAddr, Follows)>,
     tx_tweet: broadcast::Sender<Tweet>,
 ) {
     log::info!("listening on {}", listener.local_addr().unwrap());
@@ -30,15 +29,20 @@ pub async fn listener(
             Ok((stream, addr)) => {
                 log::info!("new connection from {}", addr);
 
-                let tx_requested_follows = tx_requested_follows.clone();
+                let mut tx_requested_follows = tx_requested_follows.clone();
                 let rx_tweet = tx_tweet.subscribe();
 
                 tokio::spawn(async move {
-                    let res = handler(stream, addr, tx_requested_follows, rx_tweet).await;
+                    let res = handler(stream, addr, &mut tx_requested_follows, rx_tweet).await;
 
                     if let Err(error) = res {
                         log::error!("error processing websocket for {}: {:#}", addr, error);
                     }
+
+                    tx_requested_follows
+                        .send((addr, Follows::new()))
+                        .await
+                        .unwrap();
                 });
             }
 
@@ -51,7 +55,7 @@ pub async fn listener(
 async fn handler(
     stream: TcpStream,
     addr: SocketAddr,
-    mut tx_requested_follows: mpsc::Sender<Follows>,
+    tx_requested_follows: &mut mpsc::Sender<(SocketAddr, Follows)>,
     rx_tweet: broadcast::Receiver<Tweet>,
 ) -> Result<()> {
     let mut follows = Follows::new();
@@ -81,7 +85,7 @@ async fn handler(
                     addr,
                     &mut follows,
                     &mut tx_ws,
-                    &mut tx_requested_follows,
+                    tx_requested_follows,
                 )
                 .await?;
             }
@@ -123,7 +127,7 @@ async fn handle_ws_message<S>(
     addr: SocketAddr,
     follows: &mut Follows,
     mut tx_ws: S,
-    tx_requested_follows: &mut mpsc::Sender<Follows>,
+    tx_requested_follows: &mut mpsc::Sender<(SocketAddr, Follows)>,
 ) -> Result<()>
 where
     S: Sink<Message> + Send + Sync + Unpin,
@@ -181,7 +185,7 @@ where
     // PANIC: fatal if all rx_requested_follows have dropped.
     // extremely unlikely, a panic is fine for now
     tx_requested_follows
-        .send(follows.clone())
+        .send((addr, follows.clone()))
         .await
         .expect("no rx_requested_follows remaining");
 

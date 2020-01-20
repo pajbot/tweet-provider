@@ -23,10 +23,6 @@ Default value: `127.0.0.1:2356`
 Path to the .toml config file.  
 Default value: `tweet-provider.toml`
 
-`PAJBOT_CACHE`  
-Path to the cache file. The cache file will store any Twitter users we've been told to follow, so on next bootup we know to follow them instantly.  
-Default value: `cache.json`
-
 `PAJBOT_LOG`  
 Log level  
 Default value: `INFO`
