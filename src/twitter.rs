@@ -32,8 +32,7 @@ pub async fn supervisor(
     rx_requested_follows: mpsc::Receiver<(SocketAddr, Follows)>,
     tx_tweet: broadcast::Sender<Tweet>,
 ) {
-    // The follows requested by connections
-    // Follows removed from subscriptions are not removed from this set
+    // The follows requested and their subscribers
     let mut requested_follows = RequestedFollows::new();
 
     // Whether we are currently backing off
@@ -43,8 +42,8 @@ pub async fn supervisor(
 
     // This is this the initial state, restart and twitter_stream are terminated,
     // the only live future is rx_requested_follows
-    // This means that the only way for this select to pick up is for a new client
-    // to subscribe to a non-null set of Follows
+    // This means that the only way for this select to pick up is for a client to subscribe
+    // This state is reached again when no subscriptions remain
     let restart = Fuse::terminated();
     let twitter_stream = Fuse::terminated();
     let mut rx_requested_follows = rx_requested_follows.fuse();
@@ -54,16 +53,18 @@ pub async fn supervisor(
 
     loop {
         futures::select! {
-            // We are restarting the twitter consumer after a delay, this happens in two cases:
-            // - The twitter stream has ended and scheduled to restart
-            // - A new set of requested follows was inserted
-            // In no case would requested_follows be empty
+            // We were scheduled to restart, we verify that anyone is subscribed
+            // and start a new stream
             () = restart => {
                 backing_off = false;
 
                 if requested_follows.is_empty() {
-                    log::warn!("we got nobody to follow, possibly killing da stream");
-                    twitter_stream.set(Fuse::terminated());
+                    if twitter_stream.is_terminated().not() {
+                        log::warn!("closing existing stream");
+                        twitter_stream.set(Fuse::terminated());
+                    }
+
+                    log::info!("no follows were requested, let's wait some more");
                     continue;
                 }
 
@@ -119,18 +120,20 @@ pub async fn supervisor(
                         .insert(addr);
                 }
 
-                if requires_restart && backing_off.not() {
-                    if restart.is_terminated().not() {
-                        log::info!("intercepted existing delay");
-                    }
+                requires_restart = requires_restart
+                    || (twitter_stream.is_terminated().not() && requested_follows.is_empty());
 
-                    log::info!("restarting in {:?}", NEW_FOLLOWS_RESTART_DELAY);
+                if requires_restart && backing_off.not() {
+                    log::info!("found new follows, restarting in {:?}", NEW_FOLLOWS_RESTART_DELAY);
+                    if restart.is_terminated().not() {
+                        log::info!("intercepted an existing scheduled restart");
+                    }
                     restart.set(delay_for(NEW_FOLLOWS_RESTART_DELAY).fuse());
                 }
             }
 
             complete => {
-                panic!("supervisor should never complete");
+                panic!("twitter::supervisor should never complete");
             }
         }
     }
@@ -185,7 +188,7 @@ async fn stream_consumer(
         follows.len()
     );
 
-    log::info!("starting a new twitter stream: {:?}", follows);
+    log::info!("starting a new twitter stream with follows: {:?}", follows);
 
     let mut stream = twitter::stream::filter().follow(&follows).start(&token);
 
