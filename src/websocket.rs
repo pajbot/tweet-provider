@@ -2,7 +2,7 @@ use crate::{api, Follows};
 use anyhow::{Context, Result};
 use async_tungstenite::{
     self as ws,
-    tungstenite::{protocol::WebSocketConfig, Message},
+    tungstenite::{error::Error as WsError, protocol::WebSocketConfig, Message},
 };
 use egg_mode::tweet::Tweet;
 use futures::{sink::Sink, FutureExt, SinkExt, StreamExt};
@@ -37,6 +37,10 @@ pub async fn listener(
                     let res = handler(stream, addr, tx_requested_follows, rx_tweet).await;
 
                     if let Err(error) = res {
+                        if let Some(WsError::ConnectionClosed) = error.downcast_ref() {
+                            return;
+                        }
+
                         log::error!("error processing websocket for {}: {:#}", addr, error);
                     }
                 });
@@ -143,8 +147,11 @@ where
             return Ok(());
         }
 
-        // TODO: do we need to do anything?
-        Message::Close(_) => return Ok(()),
+        Message::Close(reason) => {
+            log::info!("websocket from {} sent close frame: {:?}", addr, reason);
+            tx_ws.send(Message::Close(None)).await?;
+            return Ok(());
+        }
     };
 
     match serde_json::from_str(&data) {
