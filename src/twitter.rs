@@ -9,7 +9,6 @@ use futures::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    iter::FromIterator,
     net::SocketAddr,
     ops::Not,
     time::Duration,
@@ -68,11 +67,7 @@ pub async fn supervisor(
                     continue;
                 }
 
-                let mut follows = Follows::new();
-                follows.extend(requested_follows.keys());
-                follows.extend(&config.default_follows);
-
-                let follows = Vec::from_iter(follows);
+                let follows = requested_follows.keys().copied().collect();
                 twitter_stream
                     .set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
             }

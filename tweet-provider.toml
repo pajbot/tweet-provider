@@ -6,5 +6,3 @@
 # consumer_secret = ""
 # access_token = ""
 # access_token_secret = ""
-## list of twitter user IDs to follow by default
-# default_follows = []

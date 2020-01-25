@@ -1,8 +1,6 @@
-use crate::Follows;
 use egg_mode::{self as twitter};
 use serde::{Deserialize, Serialize};
 use std::{
-    iter::FromIterator,
     net::SocketAddr,
     path::{Path, PathBuf},
 };
@@ -83,10 +81,6 @@ pub struct Twitter {
         hide_env_values = true
     )]
     pub access_token_secret: Option<String>,
-
-    #[serde(default)]
-    #[structopt(short = "f", long = "follow")]
-    pub default_follows: Vec<u64>,
 }
 
 impl Config {
@@ -133,11 +127,6 @@ impl Twitter {
             consumer_secret: self.consumer_secret.or(other.consumer_secret),
             access_token: self.access_token.or(other.access_token),
             access_token_secret: self.access_token_secret.or(other.access_token_secret),
-
-            default_follows: Follows::from_iter(self.default_follows)
-                .union(&Follows::from_iter(other.default_follows))
-                .copied()
-                .collect(),
         }
     }
 
@@ -158,8 +147,6 @@ impl Default for Twitter {
             consumer_secret: None,
             access_token: None,
             access_token_secret: None,
-
-            default_follows: vec![],
         }
     }
 }

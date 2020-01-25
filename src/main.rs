@@ -56,7 +56,6 @@ async fn run() -> Result<()> {
 
     log::info!("config has been loaded:");
     log::info!("- listen address: {}", config.websocket.listen_addr);
-    log::info!("- default follows: {:?}", config.twitter.default_follows);
 
     let (tx_requested_follows, rx_requested_follows) =
         mpsc::channel(REQUESTED_FOLLOWS_CHANNEL_CAPACITY);
