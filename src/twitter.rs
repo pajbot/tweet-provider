@@ -112,7 +112,7 @@ pub async fn supervisor(
 
                 let mut requires_restart = false;
                 for follow in new_follows {
-                    requires_restart = requires_restart || requested_follows.contains_key(&follow);
+                    requires_restart = requires_restart || requested_follows.contains_key(&follow).not();
 
                     requested_follows
                         .entry(follow)
