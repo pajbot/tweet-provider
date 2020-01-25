@@ -69,7 +69,8 @@ pub async fn supervisor(
 
                 let follows = requested_follows.keys().copied().collect();
 
-                twitter_stream.set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
+                twitter_stream
+                    .set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
             }
 
             // The stream has ended, we inspect the given error to know how much we should be
