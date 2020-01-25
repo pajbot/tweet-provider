@@ -87,16 +87,6 @@ pub struct Twitter {
     #[serde(default)]
     #[structopt(short = "f", long = "follow")]
     pub default_follows: Vec<u64>,
-
-    #[serde(default = "Twitter::default_follows_cache")]
-    #[structopt(
-        short = "c",
-        long = "cache",
-        default_value = "cache.json",
-        env = "PAJBOT_CACHE"
-    )]
-    pub follows_cache: PathBuf,
-    // TODO: follows_cache_size
 }
 
 impl Config {
@@ -137,10 +127,6 @@ impl Default for WebSocket {
 }
 
 impl Twitter {
-    fn default_follows_cache() -> PathBuf {
-        "cache.json".into()
-    }
-
     pub fn merge(self, other: Self) -> Self {
         Self {
             consumer_key: self.consumer_key.or(other.consumer_key),
@@ -152,12 +138,6 @@ impl Twitter {
                 .union(&Follows::from_iter(other.default_follows))
                 .copied()
                 .collect(),
-
-            follows_cache: if self.follows_cache != Self::default_follows_cache() {
-                self.follows_cache
-            } else {
-                other.follows_cache
-            },
         }
     }
 
@@ -180,8 +160,6 @@ impl Default for Twitter {
             access_token_secret: None,
 
             default_follows: vec![],
-
-            follows_cache: Self::default_follows_cache(),
         }
     }
 }

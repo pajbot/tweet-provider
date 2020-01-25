@@ -3,13 +3,25 @@
 use crate::{config, Follows};
 use anyhow::{Context, Result};
 use egg_mode::{self as twitter, tweet::Tweet};
-use futures::{future::Fuse, FutureExt, StreamExt};
-use std::{ops::Not, path::Path, time::Duration};
+use futures::{
+    future::{Fuse, FusedFuture},
+    FutureExt, StreamExt,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    iter::FromIterator,
+    net::SocketAddr,
+    ops::Not,
+    time::Duration,
+};
 use tokio::{
     sync::{broadcast, mpsc},
     time::{delay_for, timeout},
 };
 
+type RequestedFollows = HashMap<u64, HashSet<SocketAddr>>;
+
+const NEW_FOLLOWS_RESTART_DELAY: Duration = Duration::from_secs(10);
 const TWITTER_STALL: Duration = Duration::from_secs(90);
 
 // starts the twitter stream,
@@ -17,18 +29,21 @@ const TWITTER_STALL: Duration = Duration::from_secs(90);
 // restarts it when there are new users to follow
 pub async fn supervisor(
     config: config::Twitter,
-    rx_requested_follows: mpsc::Receiver<Follows>,
+    rx_requested_follows: mpsc::Receiver<(SocketAddr, Follows)>,
     tx_tweet: broadcast::Sender<Tweet>,
 ) {
-    let default_follows = config.default_follows.iter().copied().collect();
+    // The follows requested and their subscribers
+    let mut requested_follows = RequestedFollows::new();
 
-    // TODO: change to LRU to prevent going over 5000 follows
-    let mut requested_follows = Follows::new();
-
+    // Whether we are currently backing off
     let mut backing_off = false;
+    // Backoff exponent
     let mut backoff = 0;
 
-    // We don't start immediately.
+    // This is this the initial state, restart and twitter_stream are terminated,
+    // the only live future is rx_requested_follows
+    // This means that the only way for this select to pick up is for a client to subscribe
+    // This state is reached again when no subscriptions remain
     let restart = Fuse::terminated();
     let twitter_stream = Fuse::terminated();
     let mut rx_requested_follows = rx_requested_follows.fuse();
@@ -38,77 +53,122 @@ pub async fn supervisor(
 
     loop {
         futures::select! {
+            // We were scheduled to restart, we verify that anyone is subscribed
+            // and start a new stream
             () = restart => {
-                let follows : Vec<u64> = requested_follows.union(&default_follows).copied().collect();
-                if !follows.is_empty() {
-                    twitter_stream.set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
+                backing_off = false;
 
-                    backing_off = false;
-                } else {
-                    log::warn!("not starting stream, nothing to follow yet");
-                    restart.set(delay_for(Duration::from_secs(5)).fuse());
+                if requested_follows.is_empty() {
+                    if twitter_stream.is_terminated().not() {
+                        log::warn!("closing existing stream");
+                        twitter_stream.set(Fuse::terminated());
+                    }
+
+                    log::info!("no follows were requested, let's wait some more");
+                    continue;
                 }
+
+                let mut follows = Follows::new();
+                follows.extend(requested_follows.keys());
+                follows.extend(&config.default_follows);
+
+                let follows = Vec::from_iter(follows);
+                twitter_stream
+                    .set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
             }
 
+            // The stream has ended, we inspect the given error to know how much we should be
+            // delaying the restart, and schedule said restart
             res = twitter_stream => {
-                backing_off = true;
-
                 let error = res.expect_err("infinite loop cannot return Ok(())");
                 log::error!("twitter stream error: {:#}", error);
 
-                // TODO: shouldn't need to downcast
-                let delay = match error.downcast() {
-                    Ok(egg_mode::error::Error::BadStatus(status)) => {
-                        let secs = if status.as_u16() == 420 {
-                            log::warn!("reached twitter rate limit, blazin it for a while");
-
-                            (60 * 2u64.pow(backoff)).min(960)
-                        } else {
-                            log::warn!("got bad status, slowing down");
-
-                            (5 * 2u64.pow(backoff)).min(320)
-                        };
-
-                        backoff += 1;
-
-                        Duration::from_secs(secs)
-                    }
-
-                    // TODO: anything more we need to handle?
-                    _ => {
-                        backoff = 0;
-
-                        Duration::from_millis((250 * backoff as u64).min(16_000))
-                    }
-                };
+                let delay = inspect_error(error, &mut backoff);
+                backing_off = true;
 
                 log::info!("restarting in {:?}", delay);
                 restart.set(delay_for(delay).fuse());
             }
 
-            new_follows = rx_requested_follows.next() => {
+            // A client has requested new follows, if any are new, we schedule a restart.
+            // If a normal (not backing off) restart was already scheduled, we ignore it and
+            // re-schedule to 10 seconds.
+            msg = rx_requested_follows.next() => {
                 // PANIC: fatal if all tx_requested_follows have dropped.
                 // extremely unlikely, a panic is fine for now
-                let new_follows = new_follows.expect("no tx_requested_follows remaining");
+                let (addr, new_follows) = msg.expect("no tx_requested_follows remaining");
 
-                if requested_follows.is_superset(&new_follows).not() {
-                    log::info!("new set of requested follows: {:?}", new_follows);
-                    requested_follows.extend(new_follows);
-
-                    let res = write_cache(&config.follows_cache, &requested_follows).await;
-                    if let Err(error) = res {
-                        log::error!(
-                            "writing to cache {:?} failed: {:#}",
-                            config.follows_cache,
-                            error
-                        );
+                // We remove addr from subscriptions it doesn't want anymore
+                for (follow, subscribers) in &mut requested_follows {
+                    if new_follows.contains(&follow) {
+                        continue;
                     }
 
-                    if backing_off.not() {
-                        restart.set(delay_for(Duration::from_secs(10)).fuse());
+                    subscribers.retain(|s| s != &addr);
+                }
+
+                // We drop follows that nobody wants anymore
+                requested_follows.retain(|_, s| s.is_empty().not());
+
+                let mut requires_restart = false;
+                for follow in new_follows {
+                    requires_restart = requires_restart || requested_follows.contains_key(&follow).not();
+
+                    requested_follows
+                        .entry(follow)
+                        .or_insert_with(HashSet::new)
+                        .insert(addr);
+                }
+
+                requires_restart = requires_restart
+                    || (twitter_stream.is_terminated().not() && requested_follows.is_empty());
+
+                if requires_restart && backing_off.not() {
+                    log::info!("found new follows, restarting in {:?}", NEW_FOLLOWS_RESTART_DELAY);
+                    if restart.is_terminated().not() {
+                        log::info!("intercepted an existing scheduled restart");
                     }
+                    restart.set(delay_for(NEW_FOLLOWS_RESTART_DELAY).fuse());
                 }
             }
+
+            complete => {
+                panic!("twitter::supervisor should never complete");
+            }
+        }
+    }
+}
+
+fn inspect_error(error: anyhow::Error, backoff: &mut u32) -> Duration {
+    // TODO: shouldn't need to downcast
+    match error.downcast() {
+        Ok(egg_mode::error::Error::BadStatus(status)) => {
+            let secs = if status.as_u16() == 420 {
+                log::warn!("reached twitter rate limit, blazin it for a while");
+
+                (60 * 2u64.pow(*backoff)).min(960)
+            } else {
+                log::warn!("got bad status, slowing down");
+
+                (5 * 2u64.pow(*backoff)).min(320)
+            };
+
+            *backoff += 1;
+
+            Duration::from_secs(secs)
+        }
+
+        Ok(egg_mode::error::Error::NetError(_)) => {
+            *backoff += 1;
+
+            Duration::from_millis((250 * *backoff as u64).min(16_000))
+        }
+
+        // TODO: anything more we need to handle?
+        _ => {
+            *backoff = 0;
+
+            Duration::from_millis(250)
         }
     }
 }
@@ -128,7 +188,7 @@ async fn stream_consumer(
         follows.len()
     );
 
-    log::info!("starting a new twitter stream: {:?}", follows);
+    log::info!("starting a new twitter stream with follows: {:?}", follows);
 
     let mut stream = twitter::stream::filter().follow(&follows).start(&token);
 
@@ -142,7 +202,7 @@ async fn stream_consumer(
 
         match msg {
             StreamMessage::Tweet(tweet) => {
-                log::debug!(
+                log::info!(
                     "got a tweet from {}: {:?}",
                     tweet.user.as_ref().unwrap().name,
                     tweet.text
@@ -151,6 +211,10 @@ async fn stream_consumer(
                 if tx_tweet.send(tweet).is_err() {
                     log::debug!("no rx_tweet available");
                 }
+            }
+
+            StreamMessage::Ping => {
+                log::debug!("twitter ping");
             }
 
             StreamMessage::Disconnect(_, desc) => {
@@ -164,14 +228,4 @@ async fn stream_consumer(
             }
         }
     }
-}
-
-pub async fn read_cache(path: impl AsRef<Path>) -> Result<Follows> {
-    Ok(serde_json::from_str(
-        &tokio::fs::read_to_string(path).await?,
-    )?)
-}
-
-pub async fn write_cache(path: impl AsRef<Path>, follows: &Follows) -> Result<()> {
-    Ok(tokio::fs::write(path, serde_json::to_string(&follows)?).await?)
 }
