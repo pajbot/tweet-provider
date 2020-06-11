@@ -6,7 +6,8 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1"
-async-tungstenite = { version = "0.3",  features = ["tokio-runtime"] }
+async-tungstenite = { version = "0.5",  features = ["tokio-runtime"] }
+egg-mode = { version = "0.15", default-features = false, features = ["rustls"] }
 futures = "0.3"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -16,8 +17,3 @@ structopt = "0.3"
 thiserror = "1"
 tokio = { version = "0.2", features = ["full"] }
 toml = "0.5"
-
-[dependencies.egg-mode]
-git = "https://github.com/QuietMisdreavus/twitter-rs"
-default-features = false
-features = ["hyper-rustls"]
