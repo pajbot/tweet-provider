@@ -14,6 +14,7 @@ use structopt::StructOpt;
 #[derive(Clone, Debug, StructOpt)]
 #[structopt(rename_all = "kebab")]
 pub struct Args {
+    /// Path to config file in TOML format
     #[structopt(
         short = "C",
         long = "conf",
@@ -25,6 +26,7 @@ pub struct Args {
     #[structopt(flatten)]
     pub config: Config,
 
+    /// Log level filter, either: ERROR, WARN, INFO, DEBUG, TRACE
     #[structopt(short = "L", long = "log", default_value = "INFO", env = "PAJBOT_LOG")]
     pub log_level: log::Level,
 }
@@ -42,6 +44,7 @@ pub struct Config {
 
 #[derive(Clone, Debug, Deserialize, Serialize, StructOpt)]
 pub struct WebSocket {
+    /// address:port to bind the websocket listener to
     #[serde(default = "WebSocket::default_listen_addr")]
     #[structopt(
         short = "l",
@@ -54,6 +57,7 @@ pub struct WebSocket {
 
 #[derive(Clone, Debug, Deserialize, Serialize, StructOpt)]
 pub struct Twitter {
+    /// Consumer API key. Found in App's Keys and tokens on https://developer.twitter.com
     #[structopt(
         long = "twitter-consumer-key",
         env = "PAJBOT_TWITTER_CONSUMER_KEY",
@@ -61,6 +65,7 @@ pub struct Twitter {
     )]
     pub consumer_key: Option<String>,
 
+    /// Consumer API secret key
     #[structopt(
         long = "twitter-consumer-secret",
         env = "PAJBOT_TWITTER_CONSUMER_SECRET",
@@ -68,6 +73,7 @@ pub struct Twitter {
     )]
     pub consumer_secret: Option<String>,
 
+    /// Access token. Found in App's Keys and tokens on https://developer.twitter.com
     #[structopt(
         long = "twitter-access-token",
         env = "PAJBOT_TWITTER_ACCESS_TOKEN",
@@ -75,6 +81,7 @@ pub struct Twitter {
     )]
     pub access_token: Option<String>,
 
+    /// Access token secret
     #[structopt(
         long = "twitter-access-token-secret",
         env = "PAJBOT_TWITTER_ACCESS_TOKEN_SECRET",
