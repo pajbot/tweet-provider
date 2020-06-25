@@ -67,9 +67,8 @@ pub async fn supervisor(
                     continue;
                 }
 
-                let follows = requested_follows.keys().copied().collect();
                 twitter_stream
-                    .set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
+                    .set(stream_consumer(config.token(), requested_follows.keys().copied().collect(), tx_tweet.clone()).fuse());
             }
 
             // The stream has ended, we inspect the given error to know how much we should be
@@ -170,7 +169,7 @@ fn inspect_error(error: anyhow::Error, backoff: &mut u32) -> Duration {
 
 async fn stream_consumer(
     token: twitter::Token,
-    follows: Vec<u64>,
+    follows: HashSet<u64>,
     tx_tweet: broadcast::Sender<Tweet>,
 ) -> Result<()> {
     use twitter::stream::StreamMessage;
@@ -185,7 +184,9 @@ async fn stream_consumer(
 
     log::info!("starting a new twitter stream with follows: {:?}", follows);
 
-    let mut stream = twitter::stream::filter().follow(&follows).start(&token);
+    let mut stream = twitter::stream::filter()
+        .follow(&follows.iter().copied().collect::<Vec<_>>())
+        .start(&token);
 
     loop {
         let msg = timeout(TWITTER_STALL, stream.next()).await?; // timeout
@@ -197,6 +198,12 @@ async fn stream_consumer(
 
         match msg {
             StreamMessage::Tweet(tweet) => {
+                let user_id = tweet.user.as_ref().unwrap().id;
+
+                if follows.contains(&user_id).not() {
+                    continue;
+                }
+
                 log::info!(
                     "got a tweet from {}: {:?}",
                     tweet.user.as_ref().unwrap().name,
