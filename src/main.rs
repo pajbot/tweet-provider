@@ -2,11 +2,11 @@
 
 use anyhow::{Context, Result};
 use config::Config;
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 use structopt::StructOpt;
 use tokio::{
     net::TcpListener,
-    sync::{broadcast, mpsc},
+    sync::{broadcast, mpsc, Notify},
 };
 
 mod api;
@@ -64,13 +64,15 @@ async fn run() -> Result<()> {
     // - attempt #1: ownership issues in twitter::supervisor
     let (tx_tweet, _) = broadcast::channel(TWEET_CHANNEL_CAPACITY);
 
-    log::info!("starting");
+    let lifeline = Arc::new(Notify::new());
 
+    log::info!("starting");
 
     let websocket_listener = websocket::listener(
         TcpListener::bind(config.websocket.listen_addr).await?,
         tx_requested_follows,
         tx_tweet.clone(),
+        &lifeline,
     );
 
     let twitter_supervisor = twitter::supervisor(config.twitter, rx_requested_follows, tx_tweet);
@@ -82,6 +84,10 @@ async fn run() -> Result<()> {
 
         res = twitter_supervisor => {
             res.context("twitter supervisor stopped")?;
+        }
+
+        _ = lifeline.notified() => {
+            log::info!("lifeline cut, exiting");
         }
 
         _ = tokio::signal::ctrl_c() => {
