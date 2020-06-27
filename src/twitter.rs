@@ -23,14 +23,14 @@ type RequestedFollows = HashMap<u64, HashSet<SocketAddr>>;
 const NEW_FOLLOWS_RESTART_DELAY: Duration = Duration::from_secs(10);
 const TWITTER_STALL: Duration = Duration::from_secs(90);
 
-// starts the twitter stream,
+// starts the twitter stream
 // restarts it when it goes down
 // restarts it when there are new users to follow
 pub async fn supervisor(
     config: config::Twitter,
     rx_requested_follows: mpsc::Receiver<(SocketAddr, Follows)>,
     tx_tweet: broadcast::Sender<Tweet>,
-) {
+) -> Result<()> {
     // The follows requested and their subscribers
     let mut requested_follows = RequestedFollows::new();
 
@@ -75,7 +75,7 @@ pub async fn supervisor(
             // The stream has ended, we inspect the given error to know how much we should be
             // delaying the restart, and schedule said restart
             res = twitter_stream => {
-                let error = res.expect_err("infinite loop cannot return Ok(())");
+                let error = res.err().context("infinite loop cannot return Ok(())")?;
                 log::error!("twitter stream error: {:#}", error);
 
                 let delay = inspect_error(error, &mut backoff);
@@ -89,9 +89,7 @@ pub async fn supervisor(
             // If a normal (not backing off) restart was already scheduled, we ignore it and
             // re-schedule to 10 seconds.
             msg = rx_requested_follows.next() => {
-                // PANIC: fatal if all tx_requested_follows have dropped.
-                // extremely unlikely, a panic is fine for now
-                let (addr, new_follows) = msg.expect("no tx_requested_follows remaining");
+                let (addr, new_follows) = msg.context("no tx_requested_follows remaining")?;
 
                 // We remove addr from subscriptions it doesn't want anymore
                 for (follow, subscribers) in &mut requested_follows {
@@ -128,7 +126,7 @@ pub async fn supervisor(
             }
 
             complete => {
-                panic!("twitter::supervisor should never complete");
+                anyhow::bail!("twitter::supervisor should never complete");
             }
         }
     }
