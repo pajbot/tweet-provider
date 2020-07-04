@@ -33,13 +33,7 @@ pub async fn listener(
                 let rx_tweet = tx_tweet.subscribe();
 
                 tokio::spawn(async move {
-                    let res = handler(
-                        stream,
-                        addr,
-                        &mut tx_requested_follows,
-                        rx_tweet,
-                    )
-                    .await;
+                    let res = handler(stream, addr, &mut tx_requested_follows, rx_tweet).await;
 
                     if let Err(error) = res {
                         if let Some(WsError::ConnectionClosed) = error.downcast_ref() {
