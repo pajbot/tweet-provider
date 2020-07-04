@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::{broadcast, mpsc},
+    sync::{mpsc, watch},
     time::{delay_for, timeout},
 };
 
@@ -29,7 +29,7 @@ const TWITTER_STALL: Duration = Duration::from_secs(90);
 pub async fn supervisor(
     config: config::Twitter,
     rx_requested_follows: mpsc::Receiver<(SocketAddr, Follows)>,
-    tx_tweet: broadcast::Sender<Tweet>,
+    tx_tweet: watch::Sender<Option<Tweet>>,
 ) {
     // The follows requested and their subscribers
     let mut requested_follows = RequestedFollows::new();
@@ -69,7 +69,7 @@ pub async fn supervisor(
 
                 let follows = requested_follows.keys().copied().collect();
                 twitter_stream
-                    .set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
+                    .set(stream_consumer(config.token(), follows, &tx_tweet).fuse());
             }
 
             // The stream has ended, we inspect the given error to know how much we should be
@@ -171,7 +171,7 @@ fn inspect_error(error: anyhow::Error, backoff: &mut u32) -> Duration {
 async fn stream_consumer(
     token: twitter::Token,
     follows: Vec<u64>,
-    tx_tweet: broadcast::Sender<Tweet>,
+    tx_tweet: &watch::Sender<Option<Tweet>>,
 ) -> Result<()> {
     use twitter::stream::StreamMessage;
 
@@ -203,7 +203,7 @@ async fn stream_consumer(
                     tweet.text
                 );
 
-                if tx_tweet.send(tweet).is_err() {
+                if tx_tweet.broadcast(Some(tweet)).is_err() {
                     log::debug!("no rx_tweet available");
                 }
             }

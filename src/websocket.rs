@@ -9,7 +9,7 @@ use futures::{sink::Sink, FutureExt, SinkExt, StreamExt};
 use std::{net::SocketAddr, ops::Not, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::{broadcast, mpsc},
+    sync::{mpsc, watch},
     time::{interval_at, timeout, Instant},
 };
 
@@ -20,7 +20,7 @@ const WS_STALL: Duration = Duration::from_secs(90);
 pub async fn listener(
     mut listener: TcpListener,
     tx_requested_follows: mpsc::Sender<(SocketAddr, Follows)>,
-    tx_tweet: broadcast::Sender<Tweet>,
+    rx_tweet: watch::Receiver<Option<Tweet>>,
 ) {
     log::info!("listening on {}", listener.local_addr().unwrap());
 
@@ -30,7 +30,7 @@ pub async fn listener(
                 log::info!("new connection from {}", addr);
 
                 let mut tx_requested_follows = tx_requested_follows.clone();
-                let rx_tweet = tx_tweet.subscribe();
+                let rx_tweet = rx_tweet.clone();
 
                 tokio::spawn(async move {
                     let res = handler(stream, addr, &mut tx_requested_follows, rx_tweet).await;
@@ -60,7 +60,7 @@ async fn handler(
     stream: TcpStream,
     addr: SocketAddr,
     tx_requested_follows: &mut mpsc::Sender<(SocketAddr, Follows)>,
-    rx_tweet: broadcast::Receiver<Tweet>,
+    rx_tweet: watch::Receiver<Option<Tweet>>,
 ) -> Result<()> {
     let mut follows = Follows::new();
 
@@ -95,14 +95,12 @@ async fn handler(
             }
 
             tweet = rx_tweet.next() => {
-                let tweet = tweet.context("fused stream to rx_tweet ran out")?;
-
-                if let Err(broadcast::RecvError::Lagged(n)) = tweet {
-                    log::error!("lagging {} items behind", n);
-                    continue;
-                }
-
                 let tweet = tweet.expect("no tx_tweet remaining");
+
+                let tweet = match tweet {
+                    Some(tweet) => tweet,
+                    None => continue,
+                };
 
                 log::debug!("sending tweet to {}", addr);
 

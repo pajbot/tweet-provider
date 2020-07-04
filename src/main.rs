@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use structopt::StructOpt;
 use tokio::{
     net::TcpListener,
-    sync::{broadcast, mpsc},
+    sync::{mpsc, watch},
 };
 
 mod api;
@@ -17,7 +17,6 @@ mod websocket;
 type Follows = HashSet<u64>;
 
 const REQUESTED_FOLLOWS_CHANNEL_CAPACITY: usize = 16;
-const TWEET_CHANNEL_CAPACITY: usize = 16;
 
 #[tokio::main]
 async fn main() {
@@ -62,7 +61,7 @@ async fn run() -> Result<()> {
 
     // TODO: change to watch::channel?
     // - attempt #1: ownership issues in twitter::supervisor
-    let (tx_tweet, _) = broadcast::channel(TWEET_CHANNEL_CAPACITY);
+    let (tx_tweet, rx_tweet) = watch::channel(None);
 
     log::info!("starting");
 
@@ -73,7 +72,7 @@ async fn run() -> Result<()> {
     tokio::spawn(websocket::listener(
         TcpListener::bind(config.websocket.listen_addr).await?,
         tx_requested_follows,
-        tx_tweet.clone(),
+        rx_tweet.clone(),
     ));
 
     tokio::spawn(twitter::supervisor(
