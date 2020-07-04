@@ -9,6 +9,7 @@ use futures::{
 };
 use std::{
     collections::{HashMap, HashSet},
+    iter::FromIterator,
     net::SocketAddr,
     ops::Not,
     time::Duration,
@@ -67,7 +68,7 @@ pub async fn supervisor(
                     continue;
                 }
 
-                let follows = requested_follows.keys().copied().collect();
+                let follows = HashSet::from_iter(requested_follows.keys().copied());
                 twitter_stream
                     .set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
             }
@@ -168,7 +169,7 @@ fn inspect_error(error: anyhow::Error, backoff: &mut u32) -> Duration {
 
 async fn stream_consumer(
     token: twitter::Token,
-    follows: Vec<u64>,
+    follows: HashSet<u64>,
     tx_tweet: broadcast::Sender<Tweet>,
 ) -> Result<()> {
     use twitter::stream::StreamMessage;
@@ -183,7 +184,9 @@ async fn stream_consumer(
 
     log::info!("starting a new twitter stream with follows: {:?}", follows);
 
-    let mut stream = twitter::stream::filter().follow(&follows).start(&token);
+    let mut stream = twitter::stream::filter()
+        .follow(&Vec::from_iter(follows.iter().copied()))
+        .start(&token);
 
     loop {
         let msg = timeout(TWITTER_STALL, stream.next()).await?; // timeout
@@ -195,11 +198,13 @@ async fn stream_consumer(
 
         match msg {
             StreamMessage::Tweet(tweet) => {
-                log::info!(
-                    "got a tweet from {}: {:?}",
-                    tweet.user.as_ref().unwrap().name,
-                    tweet.text
-                );
+                let user = tweet.user.as_ref().unwrap();
+
+                if follows.contains(&user.id).not() {
+                    continue;
+                }
+
+                log::info!("got a tweet from {}: {:?}", user.name, tweet.text);
 
                 if tx_tweet.send(tweet).is_err() {
                     log::debug!("no rx_tweet available");
