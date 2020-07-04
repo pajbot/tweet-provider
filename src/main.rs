@@ -1,6 +1,6 @@
 #![recursion_limit = "1024"] // futures::select!
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use config::Config;
 use std::collections::HashSet;
 use structopt::StructOpt;
@@ -66,25 +66,28 @@ async fn run() -> Result<()> {
 
     log::info!("starting");
 
-    // TODO: replace tokio::spawn with a select, allowing us to return errors
 
-    // `TcpListener::bind` happens here because it is fatal,
-    // moving it in `websocket::listener` would force us to panic
-    tokio::spawn(websocket::listener(
+    let websocket_listener = websocket::listener(
         TcpListener::bind(config.websocket.listen_addr).await?,
         tx_requested_follows,
         tx_tweet.clone(),
-    ));
+    );
 
-    tokio::spawn(twitter::supervisor(
-        config.twitter,
-        rx_requested_follows,
-        tx_tweet,
-    ));
+    let twitter_supervisor = twitter::supervisor(config.twitter, rx_requested_follows, tx_tweet);
 
-    tokio::signal::ctrl_c().await?;
-    println!(/* most terms will show a ^C with no newline */);
-    log::info!("interrupted, exiting");
+    tokio::select! {
+        res = websocket_listener => {
+            res.context("websocket listener stopped")?;
+        }
+
+        res = twitter_supervisor => {
+            res.context("twitter supervisor stopped")?;
+        }
+
+        _ = tokio::signal::ctrl_c() => {
+            log::info!("interrupted, exiting");
+        }
+    }
 
     Ok(())
 }
