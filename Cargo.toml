@@ -1,6 +1,6 @@
 [package]
 name = "tweet-provider"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Rasmus Karlsson <rasmus.karlsson@pajlada.com>", "Lucas Desgouilles <ldesgoui@ldesgoui.xyz>"]
 edition = "2018"
 
