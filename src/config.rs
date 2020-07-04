@@ -89,10 +89,12 @@ pub struct Twitter {
     )]
     pub access_token_secret: Option<String>,
 
+    // https://github.com/clap-rs/clap/issues/1476
     /// Always restart the twitter consumer when the requested follows change,
     /// as opposed to only when new follows are added
+    /// [env: PAJBOT_TWITTER_ALWAYS_RESTART]
     #[serde(default)]
-    #[structopt(long = "twitter-always-restart", env = "PAJBOT_TWITTER_ALWAYS_RESTART")]
+    #[structopt(long = "twitter-always-restart" /*, env = "PAJBOT_TWITTER_ALWAYS_RESTART" */)]
     pub always_restart: bool,
 }
 
