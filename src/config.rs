@@ -92,7 +92,7 @@ pub struct Twitter {
     /// Always restart the twitter consumer when the requested follows change,
     /// as opposed to only when new follows are added
     #[serde(default)]
-    #[structopt(long = "twitter-always_restart", env = "PAJBOT_TWITTER_ALWAYS_RESTART")]
+    #[structopt(long = "twitter-always-restart", env = "PAJBOT_TWITTER_ALWAYS_RESTART")]
     pub always_restart: bool,
 }
 
