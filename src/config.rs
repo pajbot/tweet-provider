@@ -55,7 +55,7 @@ pub struct WebSocket {
     pub listen_addr: SocketAddr,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, StructOpt)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, StructOpt)]
 pub struct Twitter {
     /// Consumer API key. Found in App's Keys and tokens on https://developer.twitter.com
     #[structopt(
@@ -88,6 +88,12 @@ pub struct Twitter {
         hide_env_values = true
     )]
     pub access_token_secret: Option<String>,
+
+    /// Always restart the twitter consumer when the requested follows change,
+    /// as opposed to only when new follows are added
+    #[serde(default)]
+    #[structopt(long = "twitter-always_restart", env = "PAJBOT_TWITTER_ALWAYS_RESTART")]
+    pub always_restart: bool,
 }
 
 impl Config {
@@ -134,6 +140,7 @@ impl Twitter {
             consumer_secret: self.consumer_secret.or(other.consumer_secret),
             access_token: self.access_token.or(other.access_token),
             access_token_secret: self.access_token_secret.or(other.access_token_secret),
+            always_restart: self.always_restart || other.always_restart,
         }
     }
 
@@ -143,17 +150,6 @@ impl Twitter {
         twitter::Token::Access {
             consumer: twitter::KeyPair::new(x(&self.consumer_key), x(&self.consumer_secret)),
             access: twitter::KeyPair::new(x(&self.access_token), x(&self.access_token_secret)),
-        }
-    }
-}
-
-impl Default for Twitter {
-    fn default() -> Self {
-        Self {
-            consumer_key: None,
-            consumer_secret: None,
-            access_token: None,
-            access_token_secret: None,
         }
     }
 }
