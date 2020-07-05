@@ -105,7 +105,24 @@ async fn handler(
             }
 
             tweet = rx_tweet.next() => {
-                let tweet = tweet.context("fused stream to rx_tweet ran out")?;
+                let tweet = match tweet {
+                    Some(tweet) => tweet,
+                    None => {
+                        // rx_tweet ran out, hopefully we're shutting down
+
+                        use async_tungstenite::tungstenite::protocol;
+
+                        log::info!("closing {}", addr);
+                        tx_ws
+                            .send(Message::Close(Some(protocol::CloseFrame {
+                                code: protocol::frame::coding::CloseCode::Error,
+                                reason: "tweet-provider was interrupted or encountered an error".into(),
+                            })))
+                        .await?;
+
+                        break;
+                    }
+                };
 
                 if let Err(broadcast::RecvError::Lagged(n)) = tweet {
                     log::error!("lagging {} items behind", n);
@@ -134,6 +151,8 @@ async fn handler(
             }
         }
     }
+
+    Ok(())
 }
 
 async fn handle_ws_message<S>(
