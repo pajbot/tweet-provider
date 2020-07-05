@@ -63,7 +63,6 @@ pub async fn listener(
     }
 }
 
-// TODO: send close frames when we gotta
 async fn handler(
     stream: TcpStream,
     addr: SocketAddr,
