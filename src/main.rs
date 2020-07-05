@@ -19,12 +19,24 @@ type Follows = HashSet<u64>;
 const REQUESTED_FOLLOWS_CHANNEL_CAPACITY: usize = 16;
 const TWEET_CHANNEL_CAPACITY: usize = 16;
 
-#[tokio::main]
-async fn main() {
-    if let Err(error) = run().await {
+fn main() {
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let mut failure = false;
+
+    if let Err(error) = rt.block_on(run()) {
         log::error!("fatal: {:#}", error);
+        failure = true;
+    }
+
+    log::info!("waiting one second for tasks to end");
+    rt.shutdown_timeout(std::time::Duration::from_secs(1));
+
+    if failure {
+        log::error!("error exit");
         std::process::exit(1);
     }
+
+    log::info!("exiting");
 }
 
 async fn run() -> Result<()> {
@@ -87,11 +99,11 @@ async fn run() -> Result<()> {
         }
 
         _ = lifeline.notified() => {
-            log::info!("lifeline cut, exiting");
+            log::info!("lifeline cut, shutting down");
         }
 
         _ = tokio::signal::ctrl_c() => {
-            log::info!("interrupted, exiting");
+            log::info!("interrupted, shutting down");
         }
     }
 
