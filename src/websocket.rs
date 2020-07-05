@@ -6,10 +6,10 @@ use async_tungstenite::{
 };
 use egg_mode::tweet::Tweet;
 use futures::{sink::Sink, FutureExt, SinkExt, StreamExt};
-use std::{net::SocketAddr, ops::Not, time::Duration};
+use std::{net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::{broadcast, mpsc},
+    sync::{broadcast, mpsc, Notify},
     time::{interval_at, timeout, Instant},
 };
 
@@ -21,6 +21,7 @@ pub async fn listener(
     mut listener: TcpListener,
     tx_requested_follows: mpsc::Sender<(SocketAddr, Follows)>,
     tx_tweet: broadcast::Sender<Tweet>,
+    lifeline: &Arc<Notify>,
 ) -> Result<()> {
     log::info!("listening on {}", listener.local_addr().unwrap());
 
@@ -32,8 +33,16 @@ pub async fn listener(
                 let mut tx_requested_follows = tx_requested_follows.clone();
                 let rx_tweet = tx_tweet.subscribe();
 
+                let lifeline_clone = lifeline.clone();
                 tokio::spawn(async move {
-                    let res = handler(stream, addr, &mut tx_requested_follows, rx_tweet).await;
+                    let res = handler(
+                        stream,
+                        addr,
+                        &mut tx_requested_follows,
+                        rx_tweet,
+                        lifeline_clone,
+                    )
+                    .await;
 
                     if let Err(error) = res {
                         if let Some(WsError::ConnectionClosed) = error.downcast_ref() {
@@ -60,6 +69,7 @@ async fn handler(
     addr: SocketAddr,
     tx_requested_follows: &mut mpsc::Sender<(SocketAddr, Follows)>,
     rx_tweet: broadcast::Receiver<Tweet>,
+    lifeline: Arc<Notify>,
 ) -> Result<()> {
     let mut follows = Follows::new();
 
@@ -89,6 +99,7 @@ async fn handler(
                     &mut follows,
                     &mut tx_ws,
                     tx_requested_follows,
+                    &lifeline,
                 )
                 .await?;
             }
@@ -131,6 +142,7 @@ async fn handle_ws_message<S>(
     follows: &mut Follows,
     mut tx_ws: S,
     tx_requested_follows: &mut mpsc::Sender<(SocketAddr, Follows)>,
+    lifeline: &Arc<Notify>,
 ) -> Result<()>
 where
     S: Sink<Message> + Send + Sync + Unpin,
@@ -171,7 +183,8 @@ where
 
         Ok(api::ClientMessage::Exit) => {
             log::warn!("client {} requested exit", addr);
-            std::process::exit(0);
+            lifeline.notify();
+            return Ok(());
         }
 
         Ok(api::ClientMessage::SetSubscriptions(new_follows)) => {
