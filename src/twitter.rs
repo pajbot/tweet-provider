@@ -101,10 +101,13 @@ pub async fn supervisor(
                     subscribers.retain(|s| s != &addr);
                 }
 
+                let num_follows_before = requested_follows.len();
+
                 // We drop follows that nobody wants anymore
                 requested_follows.retain(|_, s| s.is_empty().not());
 
-                let mut requires_restart = false;
+                let mut requires_restart =
+                    config.always_restart && num_follows_before < requested_follows.len();
                 for follow in new_follows {
                     requires_restart = requires_restart || requested_follows.contains_key(&follow).not();
 

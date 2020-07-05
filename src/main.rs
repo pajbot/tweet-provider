@@ -28,7 +28,11 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    let args = config::Args::from_args();
+    let mut args = config::Args::from_args();
+
+    // https://github.com/clap-rs/clap/issues/1476
+    args.config.twitter.always_restart |=
+        std::env::var_os("PAJBOT_TWITTER_ALWAYS_RESTART").is_some();
 
     simple_logger::init_with_level(args.log_level)?;
 
@@ -55,7 +59,14 @@ async fn run() -> Result<()> {
     );
 
     log::info!("config has been loaded:");
-    log::info!("- listen address: {}", config.websocket.listen_addr);
+    log::info!(
+        "- websocket listen address: {}",
+        config.websocket.listen_addr
+    );
+    log::info!(
+        "- always restart twitter consumer: {}",
+        config.twitter.always_restart
+    );
 
     let (tx_requested_follows, rx_requested_follows) =
         mpsc::channel(REQUESTED_FOLLOWS_CHANNEL_CAPACITY);
