@@ -206,7 +206,7 @@ where
         }
 
         Ok(api::ClientMessage::SetSubscriptions(new_follows)) => {
-            std::mem::replace(follows, new_follows);
+            *follows = new_follows;
         }
 
         Ok(api::ClientMessage::InsertSubscriptions(new_follows)) => {
