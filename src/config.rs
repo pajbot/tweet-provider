@@ -26,9 +26,9 @@ pub struct Args {
     #[structopt(flatten)]
     pub config: Config,
 
-    /// Log level filter, either: ERROR, WARN, INFO, DEBUG, TRACE
+    /// Log level filter, either: OFF, ERROR, WARN, INFO, DEBUG, TRACE
     #[structopt(short = "L", long = "log", default_value = "INFO", env = "PAJBOT_LOG")]
-    pub log_level: log::Level,
+    pub log_level: log::LevelFilter,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, StructOpt)]

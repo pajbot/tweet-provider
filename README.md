@@ -1,5 +1,7 @@
 # tweet-provider
 
+![Build](https://github.com/pajbot/tweet-provider/workflows/Build/badge.svg)
+
 ## Websocket
 
 - Pings every 30 seconds
