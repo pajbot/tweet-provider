@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use config::Config;
+use simple_logger::SimpleLogger;
 use std::{collections::HashSet, sync::Arc};
 use structopt::StructOpt;
 use tokio::{
@@ -46,7 +47,7 @@ async fn run() -> Result<()> {
     args.config.twitter.always_restart |=
         std::env::var_os("PAJBOT_TWITTER_ALWAYS_RESTART").is_some();
 
-    simple_logger::init_with_level(args.log_level)?;
+    SimpleLogger::new().with_level(args.log_level).init()?;
 
     log::info!("initializing");
 
