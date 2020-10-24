@@ -16,8 +16,9 @@ use std::{
 };
 use tokio::{
     sync::{broadcast, mpsc},
-    time::{delay_for, timeout},
+    time::{sleep, timeout},
 };
+use tokio_compat_02::FutureExt as _;
 
 type RequestedFollows = HashMap<u64, HashSet<SocketAddr>>;
 
@@ -83,7 +84,7 @@ pub async fn supervisor(
                 backing_off = true;
 
                 log::info!("restarting in {:?}", delay);
-                restart.set(delay_for(delay).fuse());
+                restart.set(sleep(delay).fuse());
             }
 
             // A client has requested new follows, if any are new, we schedule a restart.
@@ -125,7 +126,7 @@ pub async fn supervisor(
                     if restart.is_terminated().not() {
                         log::info!("intercepted an existing scheduled restart");
                     }
-                    restart.set(delay_for(NEW_FOLLOWS_RESTART_DELAY).fuse());
+                    restart.set(sleep(NEW_FOLLOWS_RESTART_DELAY).fuse());
                 }
             }
 
@@ -192,7 +193,7 @@ async fn stream_consumer(
         .start(&token);
 
     loop {
-        let msg = timeout(TWITTER_STALL, stream.next()).await?; // timeout
+        let msg = timeout(TWITTER_STALL, stream.next().compat()).await?; // timeout
 
         let msg = msg.context("twitter stream ran out")?;
 
