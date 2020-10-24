@@ -21,7 +21,7 @@ const REQUESTED_FOLLOWS_CHANNEL_CAPACITY: usize = 16;
 const TWEET_CHANNEL_CAPACITY: usize = 16;
 
 fn main() {
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
     let mut failure = false;
 
     if let Err(error) = rt.block_on(run()) {

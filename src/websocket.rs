@@ -18,7 +18,7 @@ const WS_SEND_QUEUE_CAPACITY: usize = 32;
 const WS_STALL: Duration = Duration::from_secs(90);
 
 pub async fn listener(
-    mut listener: TcpListener,
+    listener: TcpListener,
     tx_requested_follows: mpsc::Sender<(SocketAddr, Follows)>,
     tx_tweet: broadcast::Sender<Tweet>,
     lifeline: &Arc<Notify>,
@@ -67,7 +67,7 @@ async fn handler(
     stream: TcpStream,
     addr: SocketAddr,
     tx_requested_follows: &mut mpsc::Sender<(SocketAddr, Follows)>,
-    rx_tweet: broadcast::Receiver<Tweet>,
+    mut rx_tweet: broadcast::Receiver<Tweet>,
     lifeline: Arc<Notify>,
 ) -> Result<()> {
     let mut follows = Follows::new();
@@ -82,11 +82,10 @@ async fn handler(
     let (mut tx_ws, rx_ws) = ws.split();
 
     let mut rx_ws = rx_ws.fuse();
-    let mut rx_tweet = rx_tweet.fuse();
     let mut heartbeat = interval_at(Instant::now(), WS_HEARTBEAT).fuse();
 
     loop {
-        futures::select! {
+        tokio::select! {
             ws_msg = timeout(WS_STALL, rx_ws.next()).fuse() => {
                 let ws_msg = ws_msg.context("ws connection stalled")?;
                 let ws_msg = ws_msg.context("ws stream ended")?;
@@ -103,10 +102,14 @@ async fn handler(
                 .await?;
             }
 
-            tweet = rx_tweet.next() => {
+            tweet = rx_tweet.recv() => {
                 let tweet = match tweet {
-                    Some(tweet) => tweet,
-                    None => {
+                    Ok(tweet) => tweet,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("lagging {} items behind", n);
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
                         // rx_tweet ran out, hopefully we're shutting down
 
                         use async_tungstenite::tungstenite::protocol;
@@ -122,13 +125,6 @@ async fn handler(
                         break;
                     }
                 };
-
-                if let Err(broadcast::RecvError::Lagged(n)) = tweet {
-                    log::error!("lagging {} items behind", n);
-                    continue;
-                }
-
-                let tweet = tweet.context("no tx_tweet remaining")?;
 
                 log::debug!("sending tweet to {}", addr);
 
@@ -201,7 +197,7 @@ where
 
         Ok(api::ClientMessage::Exit) => {
             log::warn!("client {} requested exit", addr);
-            lifeline.notify();
+            lifeline.notify_one();
             return Ok(());
         }
 
