@@ -32,15 +32,15 @@ checksum = "4d25d88fd6b8041580a654f9d0c581a047baee2b3efee13275f2fc392fc75034"
 
 [[package]]
 name = "async-tungstenite"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39eca8dd578b18e557361e50ca767df55c5e62f690a5e53868c3c7a8123145b7"
+checksum = "f7cc5408453d37e2b1c6f01d8078af1da58b6cfa6a80fa2ede3bd2b9a6ada9c4"
 dependencies = [
  "futures-io",
  "futures-util",
  "log",
  "pin-project 1.0.1",
- "tokio 0.3.5",
+ "tokio 1.0.1",
  "tungstenite",
 ]
 
@@ -1317,6 +1317,18 @@ dependencies = [
  "slab",
  "tokio-macros 0.3.0",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "tokio"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d258221f566b6c803c7b4714abadc080172b272090cdc5e244a6d4dd13c3a6bd"
+dependencies = [
+ "autocfg",
+ "libc",
+ "mio 0.7.6",
+ "pin-project-lite 0.2.0",
 ]
 
 [[package]]
