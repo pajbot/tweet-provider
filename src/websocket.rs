@@ -82,7 +82,7 @@ async fn handler(
     let (mut tx_ws, rx_ws) = ws.split();
 
     let mut rx_ws = rx_ws.fuse();
-    let mut heartbeat = interval_at(Instant::now(), WS_HEARTBEAT).fuse();
+    let mut heartbeat = interval_at(Instant::now(), WS_HEARTBEAT);
 
     loop {
         tokio::select! {
@@ -138,7 +138,7 @@ async fn handler(
                 }
             }
 
-            _ = heartbeat.next() => {
+            _ = heartbeat.tick() => {
                 log::debug!("pinging {}", addr);
 
                 // TODO: send random data and verify when receiving pongs
