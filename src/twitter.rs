@@ -51,7 +51,8 @@ pub async fn supervisor(
         while let Some(item) = rx_requested_follows.recv().await {
             yield item;
         }
-    }.fuse();
+    }
+    .fuse();
 
     // pin to stack
     futures::pin_mut!(restart, twitter_stream, rx_requested_follows);
