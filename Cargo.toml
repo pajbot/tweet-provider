@@ -16,5 +16,5 @@ simple_logger = "1.11"
 structopt = "0.3"
 thiserror = "1"
 tokio = { version = "0.3", features = ["full"] }
-tokio-compat-02 = "0.1"
+tokio-compat-02 = "0.2"
 toml = "0.5"
