@@ -72,7 +72,7 @@ async fn handler(
 ) -> Result<()> {
     let mut follows = Follows::new();
 
-    let stream = ws::tokio::TokioAdapter(stream);
+    let stream = ws::tokio::TokioAdapter::new(stream);
     let ws_config = WebSocketConfig {
         max_send_queue: Some(WS_SEND_QUEUE_CAPACITY),
         ..WebSocketConfig::default()
