@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1"
-async-tungstenite = { version = "0.10",  features = ["tokio-runtime"] }
+async-tungstenite = { version = "0.13",  features = ["tokio-runtime"] }
 egg-mode = { version = "0.15", default-features = false, features = ["rustls"] }
 futures = "0.3"
 log = "0.4"
