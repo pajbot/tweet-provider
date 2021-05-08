@@ -18,7 +18,6 @@ use tokio::{
     sync::{broadcast, mpsc},
     time::{sleep, timeout},
 };
-use tokio_compat_02::FutureExt as _;
 
 type RequestedFollows = HashMap<u64, HashSet<SocketAddr>>;
 
@@ -30,7 +29,7 @@ const TWITTER_STALL: Duration = Duration::from_secs(90);
 // restarts it when there are new users to follow
 pub async fn supervisor(
     config: config::Twitter,
-    rx_requested_follows: mpsc::Receiver<(SocketAddr, Follows)>,
+    mut rx_requested_follows: mpsc::Receiver<(SocketAddr, Follows)>,
     tx_tweet: broadcast::Sender<Tweet>,
 ) -> Result<()> {
     // The follows requested and their subscribers
@@ -47,10 +46,16 @@ pub async fn supervisor(
     // This state is reached again when no subscriptions remain
     let restart = Fuse::terminated();
     let twitter_stream = Fuse::terminated();
-    let mut rx_requested_follows = rx_requested_follows.fuse();
+    // See https://docs.rs/tokio/1.0.1/tokio/stream/index.html
+    let rx_requested_follows = async_stream::stream! {
+        while let Some(item) = rx_requested_follows.recv().await {
+            yield item;
+        }
+    }
+    .fuse();
 
     // pin to stack
-    futures::pin_mut!(restart, twitter_stream);
+    futures::pin_mut!(restart, twitter_stream, rx_requested_follows);
 
     loop {
         futures::select! {
@@ -193,7 +198,7 @@ async fn stream_consumer(
         .start(&token);
 
     loop {
-        let msg = timeout(TWITTER_STALL, stream.next().compat()).await?; // timeout
+        let msg = timeout(TWITTER_STALL, stream.next()).await?; // timeout
 
         let msg = msg.context("twitter stream ran out")?;
 
