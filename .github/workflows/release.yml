@@ -19,26 +19,13 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - run: cargo build --release
-      - name: Extract tag name from ref string
-        id: get_version
-        run: echo ::set-output name=version::${GITHUB_REF#refs/tags/}
+      - name: Rename release binary
+        run: mv target/release/tweet-provider target/release/tweet-provider-linux-x86_64
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.get_version.outputs.version }}
-          release_name: ${{ steps.get_version.outputs.version }}
-          draft: false
+          files: |
+            target/release/tweet-provider-linux-x86_64
           prerelease: false
-      - name: Upload Release Asset
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./target/release/tweet-provider
-          asset_name: tweet-provider-linux-x86_64
-          asset_content_type: application/x-pie-executable
