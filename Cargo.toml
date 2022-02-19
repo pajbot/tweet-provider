@@ -8,7 +8,7 @@ edition = "2018"
 anyhow = "1"
 async-stream = "0.3"
 async-tungstenite = { version = "0.17",  features = ["tokio-runtime"] }
-egg-mode = { git = "https://github.com/RAnders00/egg-mode", branch = "tokio-v1.0-upgrade", default-features = false, features = ["rustls"] }
+egg-mode = { version = "0.16", default-features = false, features = ["rustls"] }
 futures = "0.3"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
