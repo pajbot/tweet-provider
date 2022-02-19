@@ -180,6 +180,9 @@ where
             tx_ws.send(Message::Close(None)).await?;
             return Ok(());
         }
+
+        // not received while reading
+        Message::Frame(_) => return Ok(()),
     };
 
     match serde_json::from_str(&data) {
