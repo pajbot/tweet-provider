@@ -222,7 +222,7 @@ where
         .await
         .context("no rx_requested_follows remaining")?;
 
-    send_json(&mut tx_ws, &api::ServerMessage::AckSubscriptions(&follows)).await?;
+    send_json(&mut tx_ws, &api::ServerMessage::AckSubscriptions(follows)).await?;
 
     Ok(())
 }
