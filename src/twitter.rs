@@ -100,7 +100,7 @@ pub async fn supervisor(
 
                 // We remove addr from subscriptions it doesn't want anymore
                 for (follow, subscribers) in &mut requested_follows {
-                    if new_follows.contains(&follow) {
+                    if new_follows.contains(follow) {
                         continue;
                     }
 

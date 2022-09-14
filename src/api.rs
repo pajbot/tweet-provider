@@ -41,7 +41,7 @@ impl Serialize for SerializeWrapper<&tweet::Tweet> {
         map.serialize_entry("created_at", &self.0.created_at.timestamp())?;
         map.serialize_entry(
             "user",
-            &SerializeWrapper(&self.0.user.as_ref().unwrap() as &user::TwitterUser),
+            &SerializeWrapper(self.0.user.as_ref().unwrap() as &user::TwitterUser),
         )?;
         map.serialize_entry("truncated", &self.0.truncated)?;
         map.serialize_entry("in_reply_to_user_id", &self.0.in_reply_to_user_id)?;
