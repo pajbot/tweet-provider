@@ -1,5 +1,5 @@
-use egg_mode::{self as twitter};
 use clap::{Parser, ValueEnum};
+use egg_mode::{self as twitter};
 use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
@@ -38,7 +38,12 @@ pub struct Args {
     pub log_level: log::LevelFilter,
 
     /// Log message timestamp method
-    #[clap(long = "log-timestamps", arg_enum, default_value = "utc", env = "PAJBOT_LOG_TIMESTAMPS")]
+    #[clap(
+        long = "log-timestamps",
+        arg_enum,
+        default_value = "utc",
+        env = "PAJBOT_LOG_TIMESTAMPS"
+    )]
     pub log_timestamps: LogTimestamps,
 }
 
