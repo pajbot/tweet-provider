@@ -1,0 +1,7 @@
+bin.name = "tweet-provider"
+
+status.code = 0
+
+[env.add]
+TWEET_PROVIDER_DUMP_CONFIG_AND_EXIT = "1"
+PAJBOT_LOG_TIMESTAMPS = "off"

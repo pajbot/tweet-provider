@@ -1,0 +1,10 @@
+bin.name = "tweet-provider"
+
+status.code = 0
+
+args = ["--twitter-consumer-key=fromarg"]
+
+[env.add]
+TWEET_PROVIDER_DUMP_CONFIG_AND_EXIT = "1"
+PAJBOT_LOG_TIMESTAMPS = "off"
+PAJBOT_TWITTER_CONSUMER_KEY = "fromenv"

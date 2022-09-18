@@ -1,0 +1,6 @@
+bin.name = "tweet-provider"
+
+status.code = 0
+
+[env.add]
+TWEET_PROVIDER_DUMP_ARGS_AND_EXIT = "1"

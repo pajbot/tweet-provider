@@ -1,0 +1,50 @@
+bin.name = "tweet-provider"
+args = ["-h"]
+status.code = 0
+stdout = """
+tweet-provider 0.1.2
+
+USAGE:
+    tweet-provider [OPTIONS]
+
+OPTIONS:
+    -C, --conf <CONFIG_PATH>
+            Path to config file in TOML format [env: PAJBOT_CONF=] [default: tweet-provider.toml]
+
+    -h, --help
+            Print help information
+
+    -l, --listen <LISTEN_ADDR>
+            address:port to bind the websocket listener to [env: PAJBOT_LISTEN=] [default:
+            127.0.0.1:2356]
+
+    -L, --log <LOG_LEVEL>
+            Log level filter, either: OFF, ERROR, WARN, INFO, DEBUG, TRACE [env: PAJBOT_LOG=]
+            [default: INFO]
+
+        --log-timestamps <LOG_TIMESTAMPS>
+            Log message timestamp method [env: PAJBOT_LOG_TIMESTAMPS=] [default: utc] [possible
+            values: local, utc, off]
+
+        --twitter-access-token <ACCESS_TOKEN>
+            Access token. Found in App's Keys and tokens on https://developer.twitter.com [env:
+            PAJBOT_TWITTER_ACCESS_TOKEN]
+
+        --twitter-access-token-secret <ACCESS_TOKEN_SECRET>
+            Access token secret [env: PAJBOT_TWITTER_ACCESS_TOKEN_SECRET]
+
+        --twitter-always-restart
+            Always restart the twitter consumer when the requested follows change, as opposed to
+            only when new follows are added [env: PAJBOT_TWITTER_ALWAYS_RESTART]
+
+        --twitter-consumer-key <CONSUMER_KEY>
+            Consumer API key. Found in App's Keys and tokens on https://developer.twitter.com [env:
+            PAJBOT_TWITTER_CONSUMER_KEY]
+
+        --twitter-consumer-secret <CONSUMER_SECRET>
+            Consumer API secret key [env: PAJBOT_TWITTER_CONSUMER_SECRET]
+
+    -V, --version
+            Print version information
+"""
+stderr = ""

@@ -1,0 +1,16 @@
+Config {
+    websocket: WebSocket {
+        listen_addr: 127.0.0.1:2356,
+    },
+    twitter: Twitter {
+        consumer_key: Some(
+            "fromarg",
+        ),
+        consumer_secret: None,
+        access_token: None,
+        access_token_secret: None,
+        always_restart: false,
+    },
+}
+INFO  [tweet_provider] waiting one second for tasks to end
+INFO  [tweet_provider] exiting
