@@ -1,10 +1,10 @@
 #![recursion_limit = "1024"] // futures::select!
 
 use anyhow::{Context, Result};
-use config::Config;
+use clap::Parser;
+use config::{Config, LogTimestamps};
 use simple_logger::SimpleLogger;
 use std::{collections::HashSet, sync::Arc};
-use structopt::StructOpt;
 use tokio::{
     net::TcpListener,
     sync::{broadcast, mpsc, Notify},
@@ -41,15 +41,20 @@ fn main() {
 }
 
 async fn run() -> Result<()> {
-    let mut args = config::Args::from_args();
+    let args = config::Args::parse();
 
-    // https://github.com/clap-rs/clap/issues/1476
-    args.config.twitter.always_restart |=
-        std::env::var_os("PAJBOT_TWITTER_ALWAYS_RESTART").is_some();
+    if std::env::var_os("TWEET_PROVIDER_DUMP_ARGS_AND_EXIT").is_some() {
+        println!("{:#?}", args);
+        return Ok(());
+    }
 
-    SimpleLogger::new().with_level(args.log_level).init()?;
-
-    log::info!("initializing");
+    let mut logger = SimpleLogger::new().with_level(args.log_level);
+    logger = match args.log_timestamps {
+        LogTimestamps::Local => logger.with_local_timestamps(),
+        LogTimestamps::UTC => logger.with_utc_timestamps(),
+        LogTimestamps::Off => logger.without_timestamps(),
+    };
+    logger.init()?;
 
     let config = match Config::from_toml(&args.config_path).await {
         Ok(config) => args.config.merge(config),
@@ -62,6 +67,11 @@ async fn run() -> Result<()> {
             args.config
         }
     };
+
+    if std::env::var_os("TWEET_PROVIDER_DUMP_CONFIG_AND_EXIT").is_some() {
+        println!("{:#?}", config);
+        return Ok(());
+    }
 
     anyhow::ensure!(
         config.twitter.consumer_key.is_some()
