@@ -2,6 +2,8 @@
 
 ## Unversioned
 
+- Migrate from structopt to clap v3. (#255)
+
 ## [0.1.3] - 2021-05-08
 
 - Update underlying dependencies (e.g. tokio from 0.3 to 1.5)
