@@ -5,7 +5,7 @@ stdout = """
 tweet-provider 0.1.2
 
 USAGE:
-    tweet-provider [OPTIONS]
+    tweet-provider[EXE] [OPTIONS]
 
 OPTIONS:
     -C, --conf <CONFIG_PATH>
