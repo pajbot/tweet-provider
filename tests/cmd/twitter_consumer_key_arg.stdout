@@ -1,0 +1,19 @@
+Args {
+    config_path: "tweet-provider.toml",
+    config: Config {
+        websocket: WebSocket {
+            listen_addr: 127.0.0.1:2356,
+        },
+        twitter: Twitter {
+            consumer_key: Some(
+                "test",
+            ),
+            consumer_secret: None,
+            access_token: None,
+            access_token_secret: None,
+            always_restart: false,
+        },
+    },
+    log_level: Info,
+    log_timestamps: UTC,
+}
