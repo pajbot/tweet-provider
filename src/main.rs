@@ -2,9 +2,10 @@
 #![recursion_limit = "1024"]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
-// #![warn(clippy::nursery)]
+#![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
 #![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::redundant_pub_crate)]
 
 use anyhow::{Context, Result};
 use clap::Parser;

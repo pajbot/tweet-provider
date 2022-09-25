@@ -228,8 +228,9 @@ where
     Ok(())
 }
 
-async fn send_json<S>(mut tx_ws: S, data: impl serde::Serialize) -> Result<()>
+async fn send_json<S, Data>(mut tx_ws: S, data: Data) -> Result<()>
 where
+    Data: serde::Serialize + Send + Sync,
     S: Sink<Message> + Send + Sync + Unpin,
     <S as Sink<Message>>::Error: 'static + Send + Sync + std::error::Error,
 {
