@@ -162,6 +162,7 @@ where
     S: Sink<Message> + Send + Sync + Unpin,
     <S as Sink<Message>>::Error: 'static + Send + Sync + std::error::Error,
 {
+    #[allow(clippy::match_same_arms)]
     let data = match ws_msg {
         Message::Text(data) => data,
 

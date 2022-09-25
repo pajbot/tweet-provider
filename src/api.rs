@@ -1,5 +1,5 @@
 use crate::Follows;
-use egg_mode::*;
+use egg_mode::{entities, tweet, user};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 // Stuff that the Client sends over websocket
