@@ -4,6 +4,7 @@ description = "Provides a WebSocket interface for pajbot1 to reduce Twitter API 
 version = "0.1.2"
 authors = ["Rasmus Karlsson <rasmus.karlsson@pajlada.com>", "Lucas Desgouilles <ldesgoui@ldesgoui.xyz>"]
 edition = "2018"
+license = "MIT"
 
 [dependencies]
 anyhow = "1"
