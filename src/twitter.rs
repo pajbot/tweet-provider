@@ -9,7 +9,6 @@ use futures::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    iter::FromIterator,
     net::SocketAddr,
     ops::Not,
     time::Duration,
@@ -74,7 +73,7 @@ pub async fn supervisor(
                     continue;
                 }
 
-                let follows = HashSet::from_iter(requested_follows.keys().copied());
+                let follows: Follows = requested_follows.keys().copied().collect();
                 twitter_stream
                     .set(stream_consumer(config.token(), follows, tx_tweet.clone()).fuse());
             }
@@ -164,7 +163,7 @@ fn inspect_error(error: anyhow::Error, backoff: &mut u32) -> Duration {
         Ok(egg_mode::error::Error::NetError(_)) => {
             *backoff += 1;
 
-            Duration::from_millis((250 * *backoff as u64).min(16_000))
+            Duration::from_millis((250 * u64::from(*backoff)).min(16_000))
         }
 
         // TODO: anything more we need to handle?
@@ -194,7 +193,7 @@ async fn stream_consumer(
     log::info!("starting a new twitter stream with follows: {:?}", follows);
 
     let mut stream = twitter::stream::filter()
-        .follow(&Vec::from_iter(follows.iter().copied()))
+        .follow(&follows.iter().copied().collect::<Vec<_>>())
         .start(&token);
 
     loop {

@@ -119,7 +119,7 @@ pub struct Twitter {
 impl Config {
     pub fn merge(self, other: Self) -> Self {
         Self {
-            websocket: self.websocket.merge(other.websocket),
+            websocket: self.websocket.merge(&other.websocket),
             twitter: self.twitter.merge(other.twitter),
         }
     }
@@ -134,12 +134,12 @@ impl WebSocket {
         "127.0.0.1:2356".parse().unwrap()
     }
 
-    pub fn merge(self, other: Self) -> Self {
+    pub fn merge(self, other: &Self) -> Self {
         Self {
-            listen_addr: if self.listen_addr != Self::default_listen_addr() {
-                self.listen_addr
-            } else {
+            listen_addr: if self.listen_addr == Self::default_listen_addr() {
                 other.listen_addr
+            } else {
+                self.listen_addr
             },
         }
     }
