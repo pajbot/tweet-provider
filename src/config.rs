@@ -124,7 +124,10 @@ impl Config {
         }
     }
 
-    pub async fn from_toml(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub async fn from_toml<P>(path: P) -> anyhow::Result<Self>
+        where
+            P: AsRef<Path> + Send
+    {
         Ok(toml::from_str(&tokio::fs::read_to_string(path).await?)?)
     }
 }
