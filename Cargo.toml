@@ -1,8 +1,13 @@
 [package]
 name = "tweet-provider"
+description = "Provides a WebSocket interface for pajbot1 to reduce Twitter API usage"
 version = "0.1.2"
 authors = ["Rasmus Karlsson <rasmus.karlsson@pajlada.com>", "Lucas Desgouilles <ldesgoui@ldesgoui.xyz>"]
 edition = "2018"
+license = "MIT"
+repository = "https://github.com/pajbot/tweet-provider"
+keywords = ["pajbot", "twitter"]
+categories = ["twitter", "application"]
 
 [dependencies]
 anyhow = "1"
@@ -20,4 +25,4 @@ tokio = { version = "1.21", features = ["full"] }
 toml = "0.5"
 
 [dev-dependencies]
-trycmd = "*"
+trycmd = "0.13"

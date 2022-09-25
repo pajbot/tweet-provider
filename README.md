@@ -2,6 +2,8 @@
 
 ![Build](https://github.com/pajbot/tweet-provider/workflows/Build/badge.svg)
 
+Provides a WebSocket interface for [pajbot1](https://github.com/pajbot/pajbot) to reduce Twitter API usage.
+
 ## Websocket
 
 - Pings every 30 seconds
