@@ -1,4 +1,9 @@
 #![recursion_limit = "1024"] // futures::select!
+// #![warn(clippy::all)]
+// #![warn(clippy::pedantic)]
+// #![warn(clippy::nursery)]
+#![warn(clippy::cargo)]
+#![allow(clippy::upper_case_acronyms)]
 
 use anyhow::{Context, Result};
 use clap::Parser;
