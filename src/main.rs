@@ -1,4 +1,5 @@
-#![recursion_limit = "1024"] // futures::select!
+// for futures::select!
+#![recursion_limit = "1024"]
 // #![warn(clippy::all)]
 // #![warn(clippy::pedantic)]
 // #![warn(clippy::nursery)]
