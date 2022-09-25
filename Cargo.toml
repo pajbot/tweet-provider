@@ -6,6 +6,8 @@ authors = ["Rasmus Karlsson <rasmus.karlsson@pajlada.com>", "Lucas Desgouilles <
 edition = "2018"
 license = "MIT"
 repository = "https://github.com/pajbot/tweet-provider"
+keywords = ["pajbot", "twitter"]
+categories = ["twitter", "application"]
 
 [dependencies]
 anyhow = "1"
