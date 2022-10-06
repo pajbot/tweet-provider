@@ -40,7 +40,7 @@ pub struct Args {
     /// Log message timestamp method
     #[clap(
         long = "log-timestamps",
-        arg_enum,
+        value_enum,
         default_value = "utc",
         env = "PAJBOT_LOG_TIMESTAMPS"
     )]
