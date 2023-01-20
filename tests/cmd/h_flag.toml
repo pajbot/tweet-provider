@@ -24,7 +24,7 @@ Options:
       --log-timestamps <LOG_TIMESTAMPS>
           Log message timestamp method [env: PAJBOT_LOG_TIMESTAMPS=] [default: utc] [possible values: local, utc, off]
   -h, --help
-          Print help information
+          Print help
   -V, --version
           Print version information
 """
