@@ -11,7 +11,7 @@ categories = ["twitter", "application"]
 
 [dependencies]
 anyhow = "1.0.69"
-async-stream = "0.3.3"
+async-stream = "0.3.4"
 async-tungstenite = { version = "0.20.0",  features = ["tokio-runtime"] }
 egg-mode = { version = "0.16.1", default-features = false, features = ["rustls"] }
 futures = "0.3.26"
