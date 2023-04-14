@@ -25,4 +25,4 @@ tokio = { version = "1.27.0", features = ["full"] }
 toml = "0.7.3"
 
 [dev-dependencies]
-trycmd = "0.14.15"
+trycmd = "0.14.16"
