@@ -1823,6 +1823,8 @@ dependencies = [
  "clap",
  "egg-mode",
  "futures",
+ "http",
+ "hyper",
  "log",
  "serde",
  "serde_json",

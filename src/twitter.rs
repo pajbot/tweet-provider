@@ -23,6 +23,34 @@ type RequestedFollows = HashMap<u64, HashSet<SocketAddr>>;
 const NEW_FOLLOWS_RESTART_DELAY: Duration = Duration::from_secs(10);
 const TWITTER_STALL: Duration = Duration::from_secs(90);
 
+#[derive(Clone, Copy)]
+enum ErrorKind {
+    RateLimited,
+    BadStatus,
+    NetError,
+    Unspecific,
+}
+
+impl ErrorKind {
+    fn from_error(error: anyhow::Error) -> Self {
+        // TODO: shouldn't need to downcast
+        match error.downcast() {
+            Ok(egg_mode::error::Error::BadStatus(status)) => {
+                if status.as_u16() == 420 {
+                    Self::RateLimited
+                } else {
+                    Self::BadStatus
+                }
+            }
+
+            Ok(egg_mode::error::Error::NetError(_)) => Self::NetError,
+
+            // TODO: anything more we need to handle?
+            _ => Self::Unspecific,
+        }
+    }
+}
+
 // starts the twitter stream
 // restarts it when it goes down
 // restarts it when there are new users to follow
@@ -84,7 +112,8 @@ pub async fn supervisor(
                 let error = res.err().context("infinite loop cannot return Ok(())")?;
                 log::error!("twitter stream error: {:#}", error);
 
-                let delay = inspect_error(error, &mut backoff);
+                let error_kind = ErrorKind::from_error(error);
+                let delay = inspect_error(error_kind, &mut backoff);
                 backing_off = true;
 
                 log::info!("restarting in {:?}", delay);
@@ -141,33 +170,37 @@ pub async fn supervisor(
     }
 }
 
-fn inspect_error(error: anyhow::Error, backoff: &mut u32) -> Duration {
-    // TODO: shouldn't need to downcast
-    match error.downcast() {
-        Ok(egg_mode::error::Error::BadStatus(status)) => {
-            let secs = if status.as_u16() == 420 {
-                log::warn!("reached twitter rate limit, blazin it for a while");
+fn inspect_error(error_kind: ErrorKind, backoff: &mut u32) -> Duration {
+    match error_kind {
+        ErrorKind::RateLimited => {
+            let backoff_multiplier = 2u64.saturating_pow(*backoff);
 
-                (60 * 2u64.pow(*backoff)).min(960)
-            } else {
-                log::warn!("got bad status, slowing down");
+            let secs = 60u64.saturating_mul(backoff_multiplier).min(960);
 
-                (5 * 2u64.pow(*backoff)).min(320)
-            };
-
-            *backoff += 1;
+            *backoff = backoff.saturating_add(1);
 
             Duration::from_secs(secs)
         }
 
-        Ok(egg_mode::error::Error::NetError(_)) => {
-            *backoff += 1;
+        ErrorKind::BadStatus => {
+            let backoff_multiplier = 2u64.saturating_pow(*backoff);
 
-            Duration::from_millis((250 * u64::from(*backoff)).min(16_000))
+            let secs = 5u64.saturating_mul(backoff_multiplier).min(320);
+
+            *backoff = backoff.saturating_add(1);
+
+            Duration::from_secs(secs)
         }
 
-        // TODO: anything more we need to handle?
-        _ => {
+        ErrorKind::NetError => {
+            let millis = (250 * u64::from(*backoff).max(1)).min(16_000);
+
+            *backoff = backoff.saturating_add(1);
+
+            Duration::from_millis(millis)
+        }
+
+        ErrorKind::Unspecific => {
             *backoff = 0;
 
             Duration::from_millis(250)
@@ -233,5 +266,192 @@ async fn stream_consumer(
                 log::info!("unknown twitter stuff: {:#?}", msg);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_420() {
+        let mut backoff: u32 = 0;
+
+        let error = ErrorKind::RateLimited;
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 1);
+        assert_eq!(dur, Duration::from_secs(60));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 2);
+        assert_eq!(dur, Duration::from_secs(120));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 3);
+        assert_eq!(dur, Duration::from_secs(240));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 4);
+        assert_eq!(dur, Duration::from_secs(480));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 5);
+        assert_eq!(dur, Duration::from_secs(960));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 6);
+        assert_eq!(dur, Duration::from_secs(960));
+
+        backoff = 100;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 101);
+        assert_eq!(dur, Duration::from_secs(960));
+
+        backoff = u32::MAX - 1;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, u32::MAX);
+        assert_eq!(dur, Duration::from_secs(960));
+
+        backoff = u32::MAX;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, u32::MAX);
+        assert_eq!(dur, Duration::from_secs(960));
+    }
+
+    #[test]
+    fn test_bad_status() {
+        let mut backoff: u32 = 0;
+
+        let error = ErrorKind::BadStatus;
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 1);
+        assert_eq!(dur, Duration::from_secs(5));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 2);
+        assert_eq!(dur, Duration::from_secs(10));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 3);
+        assert_eq!(dur, Duration::from_secs(20));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 4);
+        assert_eq!(dur, Duration::from_secs(40));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 5);
+        assert_eq!(dur, Duration::from_secs(80));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 6);
+        assert_eq!(dur, Duration::from_secs(160));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 7);
+        assert_eq!(dur, Duration::from_secs(320));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 8);
+        assert_eq!(dur, Duration::from_secs(320));
+
+        backoff = 100;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 101);
+        assert_eq!(dur, Duration::from_secs(320));
+
+        backoff = u32::MAX - 1;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, u32::MAX);
+        assert_eq!(dur, Duration::from_secs(320));
+
+        backoff = u32::MAX;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, u32::MAX);
+        assert_eq!(dur, Duration::from_secs(320));
+    }
+
+    #[test]
+    fn test_net() {
+        let mut backoff: u32 = 0;
+
+        let error = ErrorKind::NetError;
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 1);
+        assert_eq!(dur, Duration::from_millis(250));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 2);
+        assert_eq!(dur, Duration::from_millis(250));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 3);
+        assert_eq!(dur, Duration::from_millis(500));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 4);
+        assert_eq!(dur, Duration::from_millis(750));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 5);
+        assert_eq!(dur, Duration::from_millis(1_000));
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 6);
+        assert_eq!(dur, Duration::from_millis(1_250));
+
+        backoff = 100;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 101);
+        assert_eq!(dur, Duration::from_secs(16));
+
+        backoff = u32::MAX - 1;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, u32::MAX);
+        assert_eq!(dur, Duration::from_secs(16));
+
+        backoff = u32::MAX;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, u32::MAX);
+        assert_eq!(dur, Duration::from_secs(16));
+    }
+
+    #[test]
+    fn test_unspecified() {
+        let mut backoff: u32 = 0;
+
+        let error = ErrorKind::Unspecific;
+
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 0);
+        assert_eq!(dur, Duration::from_millis(250));
+
+        backoff = 1;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 0);
+        assert_eq!(dur, Duration::from_millis(250));
+
+        backoff = 5;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 0);
+        assert_eq!(dur, Duration::from_millis(250));
+
+        backoff = 100;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 0);
+        assert_eq!(dur, Duration::from_millis(250));
+
+        backoff = u32::MAX - 1;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 0);
+        assert_eq!(dur, Duration::from_millis(250));
+
+        backoff = u32::MAX;
+        let dur = inspect_error(error, &mut backoff);
+        assert_eq!(backoff, 0);
+        assert_eq!(dur, Duration::from_millis(250));
     }
 }
