@@ -2,6 +2,8 @@
 
 ## Unversioned
 
+## [0.1.4] - 2023-05-27
+
 - Migrate from structopt to clap v3. (#255)
 - Fix an issue where the backoff when connections fail can overflow and cause the delay to be 0s, causing connections to be spammed. (#382)
 
