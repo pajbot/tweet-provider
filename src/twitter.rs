@@ -23,6 +23,34 @@ type RequestedFollows = HashMap<u64, HashSet<SocketAddr>>;
 const NEW_FOLLOWS_RESTART_DELAY: Duration = Duration::from_secs(10);
 const TWITTER_STALL: Duration = Duration::from_secs(90);
 
+#[derive(Clone, Copy)]
+enum ErrorKind {
+    RateLimited,
+    BadStatus,
+    NetError,
+    Unspecific,
+}
+
+impl ErrorKind {
+    fn from_error(error: anyhow::Error) -> Self {
+        // TODO: shouldn't need to downcast
+        match error.downcast() {
+            Ok(egg_mode::error::Error::BadStatus(status)) => {
+                if status.as_u16() == 420 {
+                    Self::RateLimited
+                } else {
+                    Self::BadStatus
+                }
+            }
+
+            Ok(egg_mode::error::Error::NetError(_)) => Self::NetError,
+
+            // TODO: anything more we need to handle?
+            _ => Self::Unspecific,
+        }
+    }
+}
+
 // starts the twitter stream
 // restarts it when it goes down
 // restarts it when there are new users to follow
@@ -84,7 +112,8 @@ pub async fn supervisor(
                 let error = res.err().context("infinite loop cannot return Ok(())")?;
                 log::error!("twitter stream error: {:#}", error);
 
-                let delay = inspect_error(error, &mut backoff);
+                let error_kind = ErrorKind::from_error(error);
+                let delay = inspect_error(error_kind, &mut backoff);
                 backing_off = true;
 
                 log::info!("restarting in {:?}", delay);
@@ -141,33 +170,37 @@ pub async fn supervisor(
     }
 }
 
-fn inspect_error(error: anyhow::Error, backoff: &mut u32) -> Duration {
-    // TODO: shouldn't need to downcast
-    match error.downcast() {
-        Ok(egg_mode::error::Error::BadStatus(status)) => {
-            let secs = if status.as_u16() == 420 {
-                log::warn!("reached twitter rate limit, blazin it for a while");
+fn inspect_error(error_kind: ErrorKind, backoff: &mut u32) -> Duration {
+    match error_kind {
+        ErrorKind::RateLimited => {
+            let backoff_multiplier = 2u64.saturating_pow(*backoff);
 
-                (60 * 2u64.pow(*backoff)).min(960)
-            } else {
-                log::warn!("got bad status, slowing down");
+            let secs = 60u64.saturating_mul(backoff_multiplier).min(960);
 
-                (5 * 2u64.pow(*backoff)).min(320)
-            };
-
-            *backoff += 1;
+            *backoff = backoff.saturating_add(1);
 
             Duration::from_secs(secs)
         }
 
-        Ok(egg_mode::error::Error::NetError(_)) => {
-            *backoff += 1;
+        ErrorKind::BadStatus => {
+            let backoff_multiplier = 2u64.saturating_pow(*backoff);
 
-            Duration::from_millis((250 * u64::from(*backoff)).min(16_000))
+            let secs = 5u64.saturating_mul(backoff_multiplier).min(320);
+
+            *backoff = backoff.saturating_add(1);
+
+            Duration::from_secs(secs)
         }
 
-        // TODO: anything more we need to handle?
-        _ => {
+        ErrorKind::NetError => {
+            let millis = (250 * u64::from(*backoff).max(1)).min(16_000);
+
+            *backoff = backoff.saturating_add(1);
+
+            Duration::from_millis(millis)
+        }
+
+        ErrorKind::Unspecific => {
             *backoff = 0;
 
             Duration::from_millis(250)
@@ -233,5 +266,98 @@ async fn stream_consumer(
                 log::info!("unknown twitter stuff: {:#?}", msg);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case(0, Duration::from_secs(60), 1)]
+    #[case(1, Duration::from_secs(120), 2)]
+    #[case(2, Duration::from_secs(240), 3)]
+    #[case(3, Duration::from_secs(480), 4)]
+    #[case(4, Duration::from_secs(960), 5)]
+    #[case(5, Duration::from_secs(960), 6)]
+    #[case(100, Duration::from_secs(960), 101)]
+    #[case(u32::MAX-1, Duration::from_secs(960), u32::MAX)]
+    #[case(u32::MAX, Duration::from_secs(960), u32::MAX)]
+    fn test_420(
+        #[case] mut initial_backoff: u32,
+        #[case] expected_duration: Duration,
+        #[case] expected_backoff: u32,
+    ) {
+        let error = ErrorKind::RateLimited;
+
+        let dur = inspect_error(error, &mut initial_backoff);
+        assert_eq!(initial_backoff, expected_backoff);
+        assert_eq!(dur, expected_duration);
+    }
+
+    #[rstest]
+    #[case(0, Duration::from_secs(5), 1)]
+    #[case(1, Duration::from_secs(10), 2)]
+    #[case(2, Duration::from_secs(20), 3)]
+    #[case(3, Duration::from_secs(40), 4)]
+    #[case(4, Duration::from_secs(80), 5)]
+    #[case(5, Duration::from_secs(160), 6)]
+    #[case(6, Duration::from_secs(320), 7)]
+    #[case(7, Duration::from_secs(320), 8)]
+    #[case(100, Duration::from_secs(320), 101)]
+    #[case(u32::MAX-1, Duration::from_secs(320), u32::MAX)]
+    #[case(u32::MAX, Duration::from_secs(320), u32::MAX)]
+    fn test_bad_status(
+        #[case] mut initial_backoff: u32,
+        #[case] expected_duration: Duration,
+        #[case] expected_backoff: u32,
+    ) {
+        let error = ErrorKind::BadStatus;
+
+        let dur = inspect_error(error, &mut initial_backoff);
+        assert_eq!(initial_backoff, expected_backoff);
+        assert_eq!(dur, expected_duration);
+    }
+
+    #[rstest]
+    #[case(0, Duration::from_millis(250), 1)]
+    #[case(1, Duration::from_millis(250), 2)]
+    #[case(2, Duration::from_millis(500), 3)]
+    #[case(3, Duration::from_millis(750), 4)]
+    #[case(4, Duration::from_millis(1_000), 5)]
+    #[case(5, Duration::from_millis(1_250), 6)]
+    #[case(100, Duration::from_secs(16), 101)]
+    #[case(u32::MAX-1, Duration::from_secs(16), u32::MAX)]
+    #[case(u32::MAX, Duration::from_secs(16), u32::MAX)]
+    fn test_net(
+        #[case] mut initial_backoff: u32,
+        #[case] expected_duration: Duration,
+        #[case] expected_backoff: u32,
+    ) {
+        let error = ErrorKind::NetError;
+
+        let dur = inspect_error(error, &mut initial_backoff);
+        assert_eq!(initial_backoff, expected_backoff);
+        assert_eq!(dur, expected_duration);
+    }
+
+    #[rstest]
+    #[case(0, Duration::from_millis(250), 0)]
+    #[case(1, Duration::from_millis(250), 0)]
+    #[case(2, Duration::from_millis(250), 0)]
+    #[case(100, Duration::from_millis(250), 0)]
+    #[case(u32::MAX-1, Duration::from_millis(250), 0)]
+    #[case(u32::MAX, Duration::from_millis(250), 0)]
+    fn test_unspecific(
+        #[case] mut initial_backoff: u32,
+        #[case] expected_duration: Duration,
+        #[case] expected_backoff: u32,
+    ) {
+        let error = ErrorKind::Unspecific;
+
+        let dur = inspect_error(error, &mut initial_backoff);
+        assert_eq!(initial_backoff, expected_backoff);
+        assert_eq!(dur, expected_duration);
     }
 }
