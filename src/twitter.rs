@@ -272,186 +272,92 @@ async fn stream_consumer(
 #[cfg(test)]
 mod test {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn test_420() {
-        let mut backoff: u32 = 0;
-
+    #[rstest]
+    #[case(0, Duration::from_secs(60), 1)]
+    #[case(1, Duration::from_secs(120), 2)]
+    #[case(2, Duration::from_secs(240), 3)]
+    #[case(3, Duration::from_secs(480), 4)]
+    #[case(4, Duration::from_secs(960), 5)]
+    #[case(5, Duration::from_secs(960), 6)]
+    #[case(100, Duration::from_secs(960), 101)]
+    #[case(u32::MAX-1, Duration::from_secs(960), u32::MAX)]
+    #[case(u32::MAX, Duration::from_secs(960), u32::MAX)]
+    fn test_420(
+        #[case] mut initial_backoff: u32,
+        #[case] expected_duration: Duration,
+        #[case] expected_backoff: u32,
+    ) {
         let error = ErrorKind::RateLimited;
 
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 1);
-        assert_eq!(dur, Duration::from_secs(60));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 2);
-        assert_eq!(dur, Duration::from_secs(120));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 3);
-        assert_eq!(dur, Duration::from_secs(240));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 4);
-        assert_eq!(dur, Duration::from_secs(480));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 5);
-        assert_eq!(dur, Duration::from_secs(960));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 6);
-        assert_eq!(dur, Duration::from_secs(960));
-
-        backoff = 100;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 101);
-        assert_eq!(dur, Duration::from_secs(960));
-
-        backoff = u32::MAX - 1;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, u32::MAX);
-        assert_eq!(dur, Duration::from_secs(960));
-
-        backoff = u32::MAX;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, u32::MAX);
-        assert_eq!(dur, Duration::from_secs(960));
+        let dur = inspect_error(error, &mut initial_backoff);
+        assert_eq!(initial_backoff, expected_backoff);
+        assert_eq!(dur, expected_duration);
     }
 
-    #[test]
-    fn test_bad_status() {
-        let mut backoff: u32 = 0;
-
+    #[rstest]
+    #[case(0, Duration::from_secs(5), 1)]
+    #[case(1, Duration::from_secs(10), 2)]
+    #[case(2, Duration::from_secs(20), 3)]
+    #[case(3, Duration::from_secs(40), 4)]
+    #[case(4, Duration::from_secs(80), 5)]
+    #[case(5, Duration::from_secs(160), 6)]
+    #[case(6, Duration::from_secs(320), 7)]
+    #[case(7, Duration::from_secs(320), 8)]
+    #[case(100, Duration::from_secs(320), 101)]
+    #[case(u32::MAX-1, Duration::from_secs(320), u32::MAX)]
+    #[case(u32::MAX, Duration::from_secs(320), u32::MAX)]
+    fn test_bad_status(
+        #[case] mut initial_backoff: u32,
+        #[case] expected_duration: Duration,
+        #[case] expected_backoff: u32,
+    ) {
         let error = ErrorKind::BadStatus;
 
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 1);
-        assert_eq!(dur, Duration::from_secs(5));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 2);
-        assert_eq!(dur, Duration::from_secs(10));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 3);
-        assert_eq!(dur, Duration::from_secs(20));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 4);
-        assert_eq!(dur, Duration::from_secs(40));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 5);
-        assert_eq!(dur, Duration::from_secs(80));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 6);
-        assert_eq!(dur, Duration::from_secs(160));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 7);
-        assert_eq!(dur, Duration::from_secs(320));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 8);
-        assert_eq!(dur, Duration::from_secs(320));
-
-        backoff = 100;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 101);
-        assert_eq!(dur, Duration::from_secs(320));
-
-        backoff = u32::MAX - 1;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, u32::MAX);
-        assert_eq!(dur, Duration::from_secs(320));
-
-        backoff = u32::MAX;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, u32::MAX);
-        assert_eq!(dur, Duration::from_secs(320));
+        let dur = inspect_error(error, &mut initial_backoff);
+        assert_eq!(initial_backoff, expected_backoff);
+        assert_eq!(dur, expected_duration);
     }
 
-    #[test]
-    fn test_net() {
-        let mut backoff: u32 = 0;
-
+    #[rstest]
+    #[case(0, Duration::from_millis(250), 1)]
+    #[case(1, Duration::from_millis(250), 2)]
+    #[case(2, Duration::from_millis(500), 3)]
+    #[case(3, Duration::from_millis(750), 4)]
+    #[case(4, Duration::from_millis(1_000), 5)]
+    #[case(5, Duration::from_millis(1_250), 6)]
+    #[case(100, Duration::from_secs(16), 101)]
+    #[case(u32::MAX-1, Duration::from_secs(16), u32::MAX)]
+    #[case(u32::MAX, Duration::from_secs(16), u32::MAX)]
+    fn test_net(
+        #[case] mut initial_backoff: u32,
+        #[case] expected_duration: Duration,
+        #[case] expected_backoff: u32,
+    ) {
         let error = ErrorKind::NetError;
 
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 1);
-        assert_eq!(dur, Duration::from_millis(250));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 2);
-        assert_eq!(dur, Duration::from_millis(250));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 3);
-        assert_eq!(dur, Duration::from_millis(500));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 4);
-        assert_eq!(dur, Duration::from_millis(750));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 5);
-        assert_eq!(dur, Duration::from_millis(1_000));
-
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 6);
-        assert_eq!(dur, Duration::from_millis(1_250));
-
-        backoff = 100;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 101);
-        assert_eq!(dur, Duration::from_secs(16));
-
-        backoff = u32::MAX - 1;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, u32::MAX);
-        assert_eq!(dur, Duration::from_secs(16));
-
-        backoff = u32::MAX;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, u32::MAX);
-        assert_eq!(dur, Duration::from_secs(16));
+        let dur = inspect_error(error, &mut initial_backoff);
+        assert_eq!(initial_backoff, expected_backoff);
+        assert_eq!(dur, expected_duration);
     }
 
-    #[test]
-    fn test_unspecified() {
-        let mut backoff: u32 = 0;
-
+    #[rstest]
+    #[case(0, Duration::from_millis(250), 0)]
+    #[case(1, Duration::from_millis(250), 0)]
+    #[case(2, Duration::from_millis(250), 0)]
+    #[case(100, Duration::from_millis(250), 0)]
+    #[case(u32::MAX-1, Duration::from_millis(250), 0)]
+    #[case(u32::MAX, Duration::from_millis(250), 0)]
+    fn test_unspecific(
+        #[case] mut initial_backoff: u32,
+        #[case] expected_duration: Duration,
+        #[case] expected_backoff: u32,
+    ) {
         let error = ErrorKind::Unspecific;
 
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 0);
-        assert_eq!(dur, Duration::from_millis(250));
-
-        backoff = 1;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 0);
-        assert_eq!(dur, Duration::from_millis(250));
-
-        backoff = 5;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 0);
-        assert_eq!(dur, Duration::from_millis(250));
-
-        backoff = 100;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 0);
-        assert_eq!(dur, Duration::from_millis(250));
-
-        backoff = u32::MAX - 1;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 0);
-        assert_eq!(dur, Duration::from_millis(250));
-
-        backoff = u32::MAX;
-        let dur = inspect_error(error, &mut backoff);
-        assert_eq!(backoff, 0);
-        assert_eq!(dur, Duration::from_millis(250));
+        let dur = inspect_error(error, &mut initial_backoff);
+        assert_eq!(initial_backoff, expected_backoff);
+        assert_eq!(dur, expected_duration);
     }
 }
