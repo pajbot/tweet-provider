@@ -22,7 +22,7 @@ simple_logger = "4.2.0"
 clap = { version = "4.3.8", features = ["derive", "env"]}
 thiserror = "1.0.40"
 tokio = { version = "1.28.2", features = ["full"] }
-toml = "0.7.4"
+toml = "0.7.5"
 
 [dev-dependencies]
 rstest = { version = "0.17.0", default-features = false }
