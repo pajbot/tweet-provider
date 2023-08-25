@@ -26,4 +26,4 @@ toml = "0.7.6"
 
 [dev-dependencies]
 rstest = { version = "0.18.2", default-features = false }
-trycmd = "0.14.16"
+trycmd = "0.14.17"
