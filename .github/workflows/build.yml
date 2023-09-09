@@ -18,7 +18,7 @@ jobs:
       matrix:
         os: [ ubuntu, windows, macOS ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: hecrj/setup-rust-action@v2
       - uses: actions/cache@v3
         with:
@@ -35,7 +35,7 @@ jobs:
       matrix:
         os: [ ubuntu, windows, macOS ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: hecrj/setup-rust-action@v2
       - uses: actions/cache@v3
         with:
@@ -48,7 +48,7 @@ jobs:
   check-format:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: hecrj/setup-rust-action@v2
         with:
           rust-version: stable
@@ -57,7 +57,7 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: hecrj/setup-rust-action@v2
         with:
           rust-version: stable
