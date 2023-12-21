@@ -10,7 +10,7 @@ keywords = ["pajbot", "twitter"]
 categories = ["twitter", "application"]
 
 [dependencies]
-anyhow = "1.0.75"
+anyhow = "1.0.76"
 async-stream = "0.3.5"
 async-tungstenite = { version = "0.24.0",  features = ["tokio-runtime"] }
 egg-mode = { version = "0.16.1", default-features = false, features = ["rustls"] }
