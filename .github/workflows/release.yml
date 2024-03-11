@@ -22,7 +22,7 @@ jobs:
       - name: Rename release binary
         run: mv target/release/tweet-provider target/release/tweet-provider-linux-x86_64
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
