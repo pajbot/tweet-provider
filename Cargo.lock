@@ -113,9 +113,9 @@ dependencies = [
 
 [[package]]
 name = "async-tungstenite"
-version = "0.26.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67824e7945b9a2bf2057a363ab01b103e3217962afe0f3b789e6df8b13ac0a86"
+checksum = "bb786dab48e539c5f17b23bac20d812ac027c01732ed7c7b58850c69a684e46c"
 dependencies = [
  "futures-io",
  "futures-util",
